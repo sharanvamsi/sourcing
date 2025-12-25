@@ -30,10 +30,12 @@ def search_people(domain=None, job_titles=None, locations=None, seniority=None, 
     }
     
     payload = {
-        "q_organization_domains": domain,
+        # Only use q_organization_domains if it looks like a domain
+        "q_organization_domains": domain if domain and "." in domain else None,
         "person_titles": job_titles,
         "person_locations": locations,
         "person_seniorities": seniority,
+        "contact_email_status": "verified",
         "per_page": max_results,
         "page": 1
     }

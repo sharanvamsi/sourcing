@@ -33,7 +33,6 @@ def find_company_domain(company_name):
     print(f"Searching for domain of company: '{company_name}'...")
     
     # Use the same key as search/enrich, assuming it has permissions
-    # Or fallback to APOLLO_API_KEY if defined
     api_key = os.getenv("ORG_SEARCH_API_KEY")
     if not api_key:
         print("Error: ORG_SEARCH_API_KEY not found in environment variables.")
@@ -87,14 +86,17 @@ def find_company_domain(company_name):
         return None
 
 if __name__ == "__main__":
-    # Test Cases
-    print("--- Run 1 (API Calls expected if empty cache) ---")
-    find_company_domain("Stripe")
-    find_company_domain("OpenAI")
+    companies_to_test = [
+        "gatesfoundation.org",      # User's specific case
+    ]
+
+    print("\n--- STARTING RIGOROUS DOMAIN RESOLUTION TEST ---\n")
     
-    print("\n--- Run 2 (Cache Hits expected) ---")
-    find_company_domain("Stripe")
-    find_company_domain("OpenAI")
-    
-    print("\n--- New Query ---")
-    find_company_domain("Airbnb")
+    for company in companies_to_test:
+        print(f"Testing: '{company}'")
+        domain = find_company_domain(company)
+        print(f"Result : {domain}")
+        print("-" * 30)
+
+    print("\n--- CACHE VERIFICATION (Re-running 'Google') ---")
+    find_company_domain("Google") # Should hit cache
