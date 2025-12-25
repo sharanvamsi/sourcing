@@ -1,0 +1,167 @@
+[
+    {
+        "email": "willisyang@berkeley.edu",
+        "name": "Willis",
+        "team_name": "BD"
+    },
+    {
+        "email": "daheeyang@berkeley.edu",
+        "name": "Esther",
+        "team_name": "BD"
+    },
+    {
+        "email": "consultant3@example.com",
+        "name": "Consultant Three",
+        "team_name": "BD"
+    },
+    {
+        "email": "arushi_desai@berkeley.edu",
+        "name": "Arushi",
+        "team_name": "BD"
+    },
+    {
+        "email": "marklee@berkeley.edu",
+        "name": "Mark",
+        "team_name": "BD"
+    },
+    {
+        "email": "ijkcho@berkeley.edu",
+        "name": "Isaac",
+        "team_name": "BD"
+    },
+    {
+        "email": "barathmuthusamy@berkeley.edu",
+        "name": "Barath",
+        "team_name": "Finance"
+    },
+    {
+        "email": "siena.lester@berkeley.edu",
+        "name": "Siena",
+        "team_name": "Finance"
+    },
+    {
+        "email": "zhianxu@berkeley.edu",
+        "name": "Zhian",
+        "team_name": "Finance"
+    },
+    {
+        "email": "kellyyu225@berkeley.edu",
+        "name": "Kelly",
+        "team_name": "Finance"
+    },
+    {
+        "email": "jasonpham@berkeley.edu",
+        "name": "Jason",
+        "team_name": "Finance"
+    },
+    {
+        "email": "jenniewang619@berkeley.edu",
+        "name": "Jennie",
+        "team_name": "Marketing"
+    },
+    {
+        "email": "charltontsai@berkeley.edu",
+        "name": "Charlton",
+        "team_name": "Marketing"
+    },
+    {
+        "email": "evanzhong@berkeley.edu",
+        "name": "Evan",
+        "team_name": "Marketing"
+    },
+    {
+        "email": "sheatran@berkeley.edu",
+        "name": "Shea",
+        "team_name": "Marketing"
+    },
+    {
+        "email": "kxiao@berkeley.edu",
+        "name": "Katie",
+        "team_name": "NPO"
+    },
+    {
+        "email": "spema@berkeley.edu",
+        "name": "Shay",
+        "team_name": "NPO"
+    },
+    {
+        "email": "namyakumar@berkeley.edu",
+        "name": "Namya",
+        "team_name": "NPO"
+    },
+    {
+        "email": "aaravpatel1@berkeley.edu",
+        "name": "Aarav",
+        "team_name": "NPO"
+    },
+    {
+        "email": "maggier26@berkeley.edu",
+        "name": "Maggie",
+        "team_name": "NPO"
+    },
+    {
+        "email": "cloverchoi@berkeley.edu",
+        "name": "Clover",
+        "team_name": "Strategy"
+    },
+    {
+        "email": "philiptang@berkeley.edu",
+        "name": "Phillip",
+        "team_name": "Strategy"
+    },
+    {
+        "email": "ianwhite@berkeley.edu",
+        "name": "Ian",
+        "team_name": "Strategy"
+    },
+    {
+        "email": "ryan-sull@berkeley.edu",
+        "name": "Ryan",
+        "team_name": "Strategy"
+    },
+    {
+        "email": "junkang3849@berkeley.edu",
+        "name": "Jun",
+        "team_name": "Strategy"
+    },
+    {
+        "email": "sharanvamsi@berkeley.edu",
+        "name": "Sharan",
+        "team_name": "Exec Board"
+    },
+    {
+        "email": "williampham@berkeley.edu",
+        "name": "Will",
+        "team_name": "Exec Board"
+    },
+    {
+        "email": "andy_le@berkeley.edu",
+        "name": "Andy",
+        "team_name": "Exec Board"
+    },
+    {
+        "email": "adilshivakumar23@berkeley.edu",
+        "name": "Adil",
+        "team_name": "Exec Board"
+    },
+    {
+        "email": "kimgina@berkeley.edu",
+        "name": "Gina",
+        "team_name": "Exec Board"
+    },
+    {
+        "email": "kkusuma@berkeley.edu",
+        "name": "Kaika",
+        "team_name": "Exec Board"
+    },
+    {
+        "email": "prabhavpagadala@berkeley.edu",
+        "name": "Prabhav",
+        "team_name": "Exec Board"
+    },
+    {
+        "email": "liaklebanov@berkeley.edu",
+        "name": "Lia",
+        "team_name": "Exec Board"
+    }
+]
