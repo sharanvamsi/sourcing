@@ -142,13 +142,6 @@ def main():
                 st.error("Invalid password. Please check the club handbook.")
             else:
                 user_obj = get_user(login_email)
-                
-                # FAIL-SAFE: If production DB is empty and roster.json is missing,
-                # auto-initialize the primary admin account to prevent lockout.
-                admin_email = os.getenv("ADMIN_EMAIL")
-                if not user_obj and admin_email and login_email.strip().lower() == admin_email.lower():
-                    add_user(login_email.strip(), "Admin User", "Admin", is_admin=True)
-                    user_obj = get_user(login_email)
 
                 if user_obj:
                     st.session_state.user = user_obj
@@ -229,8 +222,8 @@ def main():
 
     # Tabs
     tabs = ["🔍 Search", "🛒 Basket"]
-    # Admin Check: Add Admin tab if email matches
-    is_admin = st.session_state.user['email'] == os.getenv("ADMIN_EMAIL")
+    # Admin Check: Add Admin tab if DB record says so
+    is_admin = bool(st.session_state.user.get('is_admin', False))
     if is_admin:
         tabs.append("📊 Admin")
         

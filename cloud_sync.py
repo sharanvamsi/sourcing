@@ -12,9 +12,10 @@ def push_to_cloud():
     print("----------------------------------")
     
     db_url = os.getenv("DATABASE_URL")
-    if not db_url:
-        print("❌ Error: DATABASE_URL not found in environment.")
-        db_url = input("Please paste your Railway PostgreSQL Connection URL: ").strip()
+    if not db_url or "railway.internal" in db_url:
+        print("⚠️  Warning: For local sync, you MUST use the EXTERNAL Database URL from Railway.")
+        print("   (Go to Railway -> Postgres -> Connect -> External Database URL)")
+        db_url = input("\nPlease paste your EXTERNAL Railway Connection URL: ").strip()
     
     if not db_url:
         print("❌ Aborted.")
@@ -31,11 +32,10 @@ def push_to_cloud():
             with open("roster.json", "r") as f:
                 roster = json.load(f)
             
-            admin_email = os.getenv("ADMIN_EMAIL", "").lower()
             print(f"📦 Syncing {len(roster)} users...")
             for user in roster:
                 email = user['email'].lower().strip()
-                is_admin = (email == admin_email) if admin_email else False
+                is_admin = user.get('is_admin', False)
                 cursor.execute('''
                     INSERT INTO users (email, name, team_name, is_admin)
                     VALUES (%s, %s, %s, %s)

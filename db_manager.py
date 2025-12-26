@@ -197,9 +197,8 @@ def migrate_roster_to_db(roster_data):
     """Migrates users from roster.json into the DB Users table."""
     users_in_db = get_all_users()
     if not users_in_db and roster_data:
-        admin_email = os.getenv("ADMIN_EMAIL")
         for entry in roster_data:
-            is_admin_user = (entry['email'].lower() == admin_email.lower()) if admin_email else False
+            is_admin_user = entry.get('is_admin', False)
             add_user(entry['email'], entry['name'], entry['team_name'], is_admin=is_admin_user)
         return True
     return False
