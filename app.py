@@ -158,7 +158,14 @@ def main():
                     st.rerun()
                 else:
                     log_audit_event(login_email, "LOGIN_FAILED", "Email not in database")
-                    st.error("Email not found in the roster. Please contact your administrator.")
+                    st.error("Email not found in the roster.")
+                    
+                    # Helpful hint for first-time production setup
+                    if not get_all_users():
+                        st.divider()
+                        st.info("💡 **First Time Setup?** It looks like your production database is currently empty. "
+                                "To bootstrap your account, please ensure the `ADMIN_EMAIL` environment variable "
+                                "is set in Railway, or run `python cloud_sync.py` from your local terminal.")
         return
 
     # 3. API CONFIGURATION SCREEN
