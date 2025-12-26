@@ -181,7 +181,6 @@ def get_user(email):
     """Retrieves a single user by email."""
     res = query("SELECT email, name, team_name, is_admin FROM users WHERE email = ?", (email.lower().strip(),))
     return res[0] if res else None
-
 def add_user(email, name, team_name, is_admin=False):
     """Adds or updates a user in the database roster."""
     query('''
@@ -191,7 +190,7 @@ def add_user(email, name, team_name, is_admin=False):
             name=EXCLUDED.name, 
             team_name=EXCLUDED.team_name, 
             is_admin=EXCLUDED.is_admin
-    ''', (email, name, team_name, 1 if is_admin else 0))
+    ''', (email, name, team_name, bool(is_admin)))
     log_audit_event(email, "USER_ROSTER_UPDATED", f"User {name} added/updated via DB")
 
 def migrate_roster_to_db(roster_data):
@@ -279,20 +278,27 @@ def get_user_keys(email):
 # --- REST OF THE LOGIC (WITH PARAM STYLE FIX) ---
 
 def query(q, params=()):
-    """Helper to handle Postgres vs SQLite parameter styles."""
+    """Helper to handle Postgres vs SQLite parameter styles with professional error handling."""
     p_style = q.replace("?", "%s") if DATABASE_URL else q
     conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(p_style, params)
-    if q.strip().upper().startswith("SELECT"):
-        res = [dict(r) for r in cursor.fetchall()]
-        conn.close()
-        return res
-    else:
-        if not DATABASE_URL: conn.commit()
-        last_id = cursor.lastrowid if not DATABASE_URL else None
-        conn.close()
-        return last_id
+    try:
+        cursor = conn.cursor()
+        cursor.execute(p_style, params)
+        if q.strip().upper().startswith("SELECT"):
+            res = [dict(r) for r in cursor.fetchall()]
+            conn.close()
+            return res
+        else:
+            if not DATABASE_URL: conn.commit()
+            last_id = cursor.lastrowid if not DATABASE_URL else None
+            conn.close()
+            return last_id
+    except Exception as e:
+        if conn: conn.close()
+        # Log to Sentry for the developer
+        sentry_sdk.capture_exception(e)
+        # Re-raise with a polished message for the user
+        raise RuntimeError(f"Database operation failed. The error has been logged and our team has been notified.")
 
 def sync_roster(roster_data):
     for entry in roster_data:
@@ -342,10 +348,11 @@ def clear_basket(user_email):
     if rows: query("DELETE FROM basket_leads WHERE basket_id = ?", (rows[0]['id'],))
 
 def update_lead_enrichment(apollo_id, enriched_data):
+    is_enriched_val = True if DATABASE_URL else 1
     query('''
-        UPDATE leads SET email = ?, first_name = ?, last_name = ?, is_enriched = 1, apollo_data = ?
+        UPDATE leads SET email = ?, first_name = ?, last_name = ?, is_enriched = ?, apollo_data = ?
         WHERE apollo_id = ?
-    ''', (enriched_data.get('email'), enriched_data.get('first_name'), enriched_data.get('last_name'), json.dumps(enriched_data), apollo_id))
+    ''', (enriched_data.get('email'), enriched_data.get('first_name'), enriched_data.get('last_name'), is_enriched_val, json.dumps(enriched_data), apollo_id))
 
 def log_credit_usage(user_email, action, credits):
     query("INSERT INTO credit_logs (user_email, action, credit_spent) VALUES (?, ?, ?)", (user_email, action, credits))
