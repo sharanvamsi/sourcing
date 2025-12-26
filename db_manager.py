@@ -196,9 +196,11 @@ def add_user(email, name, team_name, is_admin=False):
 def migrate_roster_to_db(roster_data):
     """Migrates users from roster.json into the DB Users table."""
     users_in_db = get_all_users()
-    if not users_in_db:
+    if not users_in_db and roster_data:
+        admin_email = os.getenv("ADMIN_EMAIL")
         for entry in roster_data:
-            add_user(entry['email'], entry['name'], entry['team_name'], is_admin=(entry['email'] == "sharanvamsi@berkeley.edu"))
+            is_admin_user = (entry['email'].lower() == admin_email.lower()) if admin_email else False
+            add_user(entry['email'], entry['name'], entry['team_name'], is_admin=is_admin_user)
         return True
     return False
 
@@ -298,7 +300,7 @@ def query(q, params=()):
         # Log to Sentry for the developer
         sentry_sdk.capture_exception(e)
         # Re-raise with a polished message for the user
-        raise RuntimeError(f"Database operation failed. The error has been logged and our team has been notified.")
+        raise RuntimeError(f"Database operation failed. The error has been logged.")
 
 def sync_roster(roster_data):
     for entry in roster_data:
