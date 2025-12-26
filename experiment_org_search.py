@@ -5,30 +5,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-CACHE_FILE = "domain_cache.json"
-
-def load_cache():
-    if os.path.exists(CACHE_FILE):
-        try:
-            with open(CACHE_FILE, "r") as f:
-                return json.load(f)
-        except json.JSONDecodeError:
-            return {}
-    return {}
-
-def save_cache(cache):
-    with open(CACHE_FILE, "w") as f:
-        json.dump(cache, f, indent=4)
+from db_manager import get_cached_domain, update_domain_cache
 
 def find_company_domain(company_name):
     # Normalize key to lower case for consistent caching
     cache_key = company_name.strip().lower()
     
-    # 1. Check Cache
-    cache = load_cache()
-    if cache_key in cache:
-        print(f"Cache Hit: '{company_name}' -> {cache[cache_key]}")
-        return cache[cache_key]
+    # 1. Check DB Cache
+    cached_domain = get_cached_domain(cache_key)
+    if cached_domain:
+        print(f"DB Cache Hit: '{company_name}' -> {cached_domain}")
+        return cached_domain
         
     print(f"Searching for domain of company: '{company_name}'...")
     
@@ -67,10 +54,9 @@ def find_company_domain(company_name):
                 
                 print(f"Found: {name} -> {domain}")
                 
-                # 2. Update Cache
+                # 2. Update DB Cache
                 if domain:
-                    cache[cache_key] = domain
-                    save_cache(cache)
+                    update_domain_cache(cache_key, domain)
                     
                 return domain
             else:

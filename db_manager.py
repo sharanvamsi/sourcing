@@ -121,7 +121,7 @@ def init_db():
             )
         ''')
 
-    # 8. Audit Logs (NEW for Sprint 7)
+    # 8. Audit Logs
     if DATABASE_URL:
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS audit_logs (
@@ -142,6 +142,18 @@ def init_db():
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+
+    # 9. Blacklist (NEW for Sprint 8)
+    cursor.execute("CREATE TABLE IF NOT EXISTS blacklist (domain TEXT PRIMARY KEY)")
+
+    # 10. Domain Cache (NEW for Sprint 8)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS domain_cache (
+            company_name TEXT PRIMARY KEY,
+            domain TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
 
     if not DATABASE_URL: conn.commit()
     conn.close()
@@ -190,6 +202,34 @@ def migrate_roster_to_db(roster_data):
             add_user(entry['email'], entry['name'], entry['team_name'], is_admin=(entry['email'] == "sharanvamsi@berkeley.edu"))
         return True
     return False
+
+# --- BLACKLIST & DOMAIN CACHE (NEW for Sprint 8) ---
+
+def get_blacklist():
+    """Retrieves all blacklisted domains."""
+    res = query("SELECT domain FROM blacklist")
+    return [r['domain'] for r in res]
+
+def add_to_blacklist(domain):
+    """Adds a domain to the blacklist."""
+    query("INSERT INTO blacklist (domain) VALUES (?) ON CONFLICT DO NOTHING", (domain.lower().strip(),))
+
+def remove_from_blacklist(domain):
+    """Removes a domain from the blacklist."""
+    query("DELETE FROM blacklist WHERE domain = ?", (domain.lower().strip(),))
+
+def get_cached_domain(company_name):
+    """Retrieves a cached domain for a company name."""
+    res = query("SELECT domain FROM domain_cache WHERE company_name = ?", (company_name.lower().strip(),))
+    return res[0]['domain'] if res else None
+
+def update_domain_cache(company_name, domain):
+    """Updates or adds a company domain to the cache."""
+    query('''
+        INSERT INTO domain_cache (company_name, domain)
+        VALUES (?, ?)
+        ON CONFLICT(company_name) DO UPDATE SET domain=EXCLUDED.domain, timestamp=CURRENT_TIMESTAMP
+    ''', (company_name.lower().strip(), domain.lower().strip()))
 
 # --- KEY PERSISTENCE (ENCRYPTED) ---
 

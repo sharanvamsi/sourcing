@@ -10,7 +10,9 @@ from db_manager import (
     init_db, sync_roster, get_basket_leads, add_lead_to_basket, 
     clear_basket, update_lead_enrichment, log_credit_usage, is_lead_sourced_by_team,
     save_user_keys, get_user_keys, query, log_audit_event,
-    get_user, get_all_users, add_user, migrate_roster_to_db
+    get_user, get_all_users, add_user, migrate_roster_to_db,
+    get_blacklist, add_to_blacklist, remove_from_blacklist,
+    get_cached_domain, update_domain_cache
 )
 
 # --- SENTRY INITIALIZATION ---
@@ -80,6 +82,21 @@ def check_blacklist(domain, blacklist):
             return True
     return False
 
+def migrate_configs_to_db():
+    """One-time migration of blacklist and domain cache to DB."""
+    # 1. Blacklist
+    if not get_blacklist():
+        local_blacklist = load_json(BLACKLIST_FILE)
+        for domain in local_blacklist:
+            add_to_blacklist(domain)
+    
+    # 2. Domain Cache (Only if DB cache is empty)
+    # We'll check via a direct query for speed
+    if not query("SELECT 1 FROM domain_cache LIMIT 1"):
+        local_cache = load_json("domain_cache.json", default={})
+        for name, domain in local_cache.items():
+            update_domain_cache(name, domain)
+
 # --- STATE INITIALIZATION ---
 if "user" not in st.session_state:
     st.session_state.user = None
@@ -100,11 +117,14 @@ def main():
 
     # 1. LOAD CONFIG DATA
     init_db()
-    roster = load_json(ROSTER_FILE) # Local fallback
-    sync_roster(roster)
-    migrate_roster_to_db(roster) # Ensure DB is seeded from JSON if empty
     
-    blacklist = load_json(BLACKLIST_FILE)
+    # Run Seeding logic
+    roster = load_json(ROSTER_FILE) # Local fallback
+    migrate_roster_to_db(roster)
+    migrate_configs_to_db()
+    
+    # Fetch active blacklist from DB
+    blacklist = get_blacklist()
 
     # 2. LOGIN SCREEN
     if not st.session_state.user:
@@ -462,9 +482,23 @@ def main():
                 st.info("No usage data recorded yet.")
             
             st.divider()
-            st.subheader("Global Blacklist")
-            st.write(", ".join(blacklist))
-            
+            st.subheader("Blacklist Management")
+            with st.expander("Manage Blocked Domains"):
+                new_blocked = st.text_input("Add Domain to Blacklist (e.g., google.com)")
+                if st.button("Add to Blacklist"):
+                    if new_blocked:
+                        add_to_blacklist(new_blocked)
+                        st.success(f"Added {new_blocked} to blacklist!")
+                        st.rerun()
+                
+                st.write("**Current Blacklist:**")
+                for b_domain in blacklist:
+                    col_b, col_r = st.columns([3, 1])
+                    col_b.write(f"- {b_domain}")
+                    if col_r.button("Remove", key=f"rm_{b_domain}"):
+                        remove_from_blacklist(b_domain)
+                        st.rerun()
+
             st.divider()
             st.subheader("User Management")
             with st.expander("Add/Update Member"):
