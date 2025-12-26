@@ -120,8 +120,35 @@ def init_db():
             )
         ''')
 
+    # 8. Audit Logs (NEW for Sprint 7)
+    if DATABASE_URL:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id SERIAL PRIMARY KEY,
+                user_email TEXT,
+                event_type TEXT,
+                details TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+    else:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_email TEXT,
+                event_type TEXT,
+                details TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
     if not DATABASE_URL: conn.commit()
     conn.close()
+
+def log_audit_event(email, event_type, details=None):
+    """Logs a security or business event to the audit_logs table."""
+    query("INSERT INTO audit_logs (user_email, event_type, details) VALUES (?, ?, ?)", 
+          (email, event_type, details))
 
 # --- KEY PERSISTENCE (ENCRYPTED) ---
 

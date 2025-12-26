@@ -3,13 +3,23 @@ import json
 import pandas as pd
 import os
 import math
+import sentry_sdk
 from experiment_search import search_people, find_company_domain
 from experiment_enrich import enrich_people
 from db_manager import (
     init_db, sync_roster, get_basket_leads, add_lead_to_basket, 
     clear_basket, update_lead_enrichment, log_credit_usage, is_lead_sourced_by_team,
-    save_user_keys, get_user_keys, query
+    save_user_keys, get_user_keys, query, log_audit_event
 )
+
+# --- SENTRY INITIALIZATION ---
+SENTRY_DSN = os.getenv("SENTRY_DSN")
+if SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        traces_sample_rate=1.0,
+        profiles_sample_rate=1.0,
+    )
 
 # --- CONFIGURATION ---
 st.set_page_config(page_title="ABA Sourcing", layout="wide")
@@ -104,15 +114,18 @@ def main():
             if not login_email or not login_pass:
                 st.warning("Please enter your email and password.")
             elif login_pass != "club2025": # Simple shared password for club early access
+                log_audit_event(login_email, "LOGIN_FAILED", "Invalid club password")
                 st.error("Invalid password. Please check the club handbook.")
             else:
                 user_obj = next((p for p in roster if p.get('email', '').lower() == login_email.strip().lower()), None)
                 if user_obj:
                     st.session_state.user = user_obj
+                    log_audit_event(login_email, "LOGIN_SUCCESS")
                     # Persistence: Load basket from DB on login
                     st.session_state.basket = get_basket_leads(user_obj['email'])
                     st.rerun()
                 else:
+                    log_audit_event(login_email, "LOGIN_FAILED", "Email not in roster")
                     st.error("Email not found in the roster.")
         return
 
@@ -440,6 +453,17 @@ def main():
             st.divider()
             st.subheader("Global Blacklist")
             st.write(", ".join(blacklist))
+            
+            st.divider()
+            st.subheader("Security Feed (Audit Logs)")
+            audit_data = query("SELECT timestamp, user_email, event_type, details FROM audit_logs ORDER BY timestamp DESC LIMIT 20")
+            if audit_data:
+                st.dataframe(pd.DataFrame(audit_data), use_container_width=True)
+            else:
+                st.info("No security events recorded.")
+            
+            if SENTRY_DSN:
+                st.info("🚀 Sentry Observability is active. Full error tracebacks are available in the Sentry Dashboard.")
 
 
 if __name__ == "__main__":
