@@ -28,8 +28,7 @@ if SENTRY_DSN:
 
 # --- CONFIGURATION ---
 st.set_page_config(
-    page_title="ABA Sourcing | Premium Talent Search",
-    page_icon="🧪",
+    page_title="ABA Sourcing    ",
     layout="wide"
 )
 

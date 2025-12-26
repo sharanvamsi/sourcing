@@ -8,6 +8,20 @@ from psycopg2.extras import RealDictCursor
 from security_manager import encrypt_key, decrypt_key
 import sentry_sdk
 
+def convert_datetime_to_str(obj):
+    """
+    Recursively converts datetime objects to ISO format strings in dictionaries and lists.
+    This prevents JSON serialization errors when PostgreSQL returns TIMESTAMP as datetime objects.
+    """
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    elif isinstance(obj, dict):
+        return {key: convert_datetime_to_str(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_datetime_to_str(item) for item in obj]
+    else:
+        return obj
+
 DB_NAME = "sourcing.db"
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -17,7 +31,7 @@ db_pool = None
 if DATABASE_URL:
     try:
         # Min 1, Max 20 connections
-        db_pool = psycopg2.pool.ThreadedConnectionPool(1, 20, dsn=DATABASE_URL)
+        db_pool = psycopg2.pool.ThreadedConnectionPool(1, 35, dsn=DATABASE_URL)
     except Exception as e:
         sentry_sdk.capture_exception(e)
         print(f"❌ Critical: Could not initialize DB Pool: {e}")
@@ -359,6 +373,8 @@ def get_basket_leads(user_email):
     results = []
     for r in leads_rows:
         lead = dict(r)
+        # Convert datetime objects to strings before processing
+        lead = convert_datetime_to_str(lead)
         if lead['apollo_data']: lead.update(json.loads(lead['apollo_data']))
         results.append(lead)
     return results
@@ -371,7 +387,7 @@ def add_lead_to_basket(user_email, apollo_person):
         ON CONFLICT(apollo_id) DO UPDATE SET apollo_data=EXCLUDED.apollo_data
     ''', (
         apollo_id, apollo_person.get('first_name'), apollo_person.get('last_name_obfuscated'),
-        apollo_person.get('title'), apollo_person.get('organization', {}).get('name'), json.dumps(apollo_person)
+        apollo_person.get('title'), apollo_person.get('organization', {}).get('name'), json.dumps(apollo_person, default=str)
     ))
     
     rows = query("SELECT id FROM baskets WHERE user_email = ?", (user_email,))
@@ -384,10 +400,12 @@ def clear_basket(user_email):
 
 def update_lead_enrichment(apollo_id, enriched_data):
     is_enriched_val = True if DATABASE_URL else 1
+    # Convert datetime objects to strings before JSON serialization
+    serializable_data = convert_datetime_to_str(enriched_data)
     query('''
         UPDATE leads SET email = ?, first_name = ?, last_name = ?, is_enriched = ?, apollo_data = ?
         WHERE apollo_id = ?
-    ''', (enriched_data.get('email'), enriched_data.get('first_name'), enriched_data.get('last_name'), is_enriched_val, json.dumps(enriched_data, default=str), apollo_id))
+    ''', (serializable_data.get('email'), serializable_data.get('first_name'), serializable_data.get('last_name'), is_enriched_val, json.dumps(serializable_data), apollo_id))
 
 def log_credit_usage(user_email, action, credits):
     query("INSERT INTO credit_logs (user_email, action, credit_spent) VALUES (?, ?, ?)", (user_email, action, credits))
