@@ -17,6 +17,8 @@ SENTRY_DSN = os.getenv("SENTRY_DSN")
 if SENTRY_DSN:
     sentry_sdk.init(
         dsn=SENTRY_DSN,
+        enable_logs=True,
+        send_default_pii=True, # Helps map errors to specific user emails
         traces_sample_rate=1.0,
         profiles_sample_rate=1.0,
     )
