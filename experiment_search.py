@@ -1,6 +1,5 @@
 import os
 import requests
-import json
 import sentry_sdk
 from dotenv import load_dotenv
 from experiment_org_search import find_company_domain

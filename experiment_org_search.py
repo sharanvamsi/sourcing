@@ -1,6 +1,5 @@
 import os
 import requests
-import json
 import sentry_sdk
 from dotenv import load_dotenv
 

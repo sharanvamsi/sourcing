@@ -66,11 +66,11 @@ def load_json(filepath, default=[]):
     with open(filepath, "r") as f:
         try:
             return json.load(f)
-    except Exception as e:
-        # Only log if it's not a simple 'File Not Found'
-        if not isinstance(e, FileNotFoundError):
-            sentry_sdk.capture_exception(e)
-        return default
+        except Exception as e:
+            # Only log if it's not a simple 'File Not Found'
+            if not isinstance(e, FileNotFoundError):
+                sentry_sdk.capture_exception(e)
+            return default
 
 def save_json(filepath, data):
     with open(filepath, "w") as f:
