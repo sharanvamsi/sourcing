@@ -234,18 +234,10 @@ def update_domain_cache(company_name, domain):
 # --- KEY PERSISTENCE (ENCRYPTED) ---
 
 def save_user_keys(email, keys_dict):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('''
+    """Saves encrypted API keys for a user using the safe query helper."""
+    query('''
         INSERT INTO user_keys (user_email, mixed_people_key_enc, bulk_match_key_enc, org_search_key_enc)
-        VALUES (%s, %s, %s, %s)
-        ON CONFLICT (user_email) DO UPDATE SET
-            mixed_people_key_enc = EXCLUDED.mixed_people_key_enc,
-            bulk_match_key_enc = EXCLUDED.bulk_match_key_enc,
-            org_search_key_enc = EXCLUDED.org_search_key_enc
-    '''.replace("%s", "?") if not DATABASE_URL else '''
-        INSERT INTO user_keys (user_email, mixed_people_key_enc, bulk_match_key_enc, org_search_key_enc)
-        VALUES (%s, %s, %s, %s)
+        VALUES (?, ?, ?, ?)
         ON CONFLICT (user_email) DO UPDATE SET
             mixed_people_key_enc = EXCLUDED.mixed_people_key_enc,
             bulk_match_key_enc = EXCLUDED.bulk_match_key_enc,
@@ -256,19 +248,14 @@ def save_user_keys(email, keys_dict):
         encrypt_key(keys_dict.get("BULK_MATCH_API_KEY")),
         encrypt_key(keys_dict.get("ORG_SEARCH_API_KEY"))
     ))
-    if not DATABASE_URL: conn.commit()
-    conn.close()
 
 def get_user_keys(email):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM user_keys WHERE user_email = ?", (email,) if not DATABASE_URL else (email,))
-    row = cursor.fetchone()
-    conn.close()
-    if not row: return None
+    """Retrieves and decrypts API keys for a user using the safe query helper."""
+    rows = query("SELECT * FROM user_keys WHERE user_email = ?", (email,))
+    if not rows: 
+        return None
     
-    # In SQLite row is a Row object, in Postgres it's a dict (due to RealDictCursor)
-    r = dict(row)
+    r = rows[0]
     return {
         "MIXED_PEOPLE_API_KEY": decrypt_key(r.get("mixed_people_key_enc")),
         "BULK_MATCH_API_KEY": decrypt_key(r.get("bulk_match_key_enc")),
