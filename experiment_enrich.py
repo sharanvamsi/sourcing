@@ -37,7 +37,9 @@ def enrich_people(people_list):
         }
 
         try:
-            response = requests.post(url, headers=headers, json=payload)
+            # Manually serialize to handle datetime objects from DB
+            json_payload = json.dumps(payload, default=str)
+            response = requests.post(url, headers=headers, data=json_payload)
             if response.status_code == 200:
                 data = response.json()
                 matches = data.get('matches', [])
