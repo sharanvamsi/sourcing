@@ -22,31 +22,30 @@ def get_db_connection():
         return conn
 
 def init_db():
-    """Initializes the database schema (works for both SQLite and Postgres)."""
+    """Initializes the database schema with Postgres-safe syntax."""
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # helper for Postgres compatibility
-    def execute(q):
-        try: cursor.execute(q)
-        except Exception as e: print(f"Schema update note: {e}")
-
-    # Teams Table
-    execute('''CREATE TABLE IF NOT EXISTS teams (name TEXT PRIMARY KEY)''')
+    # 1. Teams
+    if DATABASE_URL:
+        cursor.execute("CREATE TABLE IF NOT EXISTS teams (name TEXT PRIMARY KEY)")
+    else:
+        cursor.execute("CREATE TABLE IF NOT EXISTS teams (name TEXT PRIMARY KEY)")
     
-    # Users Table (Added password_hash and is_admin)
-    execute('''
+    # 2. Users (Fix Boolean Default)
+    bool_default = "FALSE" if DATABASE_URL else "0"
+    cursor.execute(f'''
         CREATE TABLE IF NOT EXISTS users (
             email TEXT PRIMARY KEY,
             name TEXT NOT NULL,
             team_name TEXT,
             password_hash TEXT,
-            is_admin BOOLEAN DEFAULT 0
+            is_admin BOOLEAN DEFAULT {bool_default}
         )
     ''')
     
-    # User Keys (NEW: Encrypted storage)
-    execute('''
+    # 3. User Keys
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS user_keys (
             user_email TEXT PRIMARY KEY,
             mixed_people_key_enc TEXT,
@@ -56,20 +55,26 @@ def init_db():
         )
     ''')
     
-    # Baskets Table
-    execute('''
-        CREATE TABLE IF NOT EXISTS baskets (
-            id SERIAL PRIMARY KEY if NOT EXISTS id, 
-            user_email TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    # fallback for SQLite serial
-    if not DATABASE_URL:
-        execute('CREATE TABLE IF NOT EXISTS baskets (id INTEGER PRIMARY KEY AUTOINCREMENT, user_email TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
+    # 4. Baskets (Fix Serial Syntax)
+    if DATABASE_URL:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS baskets (
+                id SERIAL PRIMARY KEY,
+                user_email TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+    else:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS baskets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_email TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
 
-    # Leads Table
-    execute('''
+    # 5. Leads (Fix Boolean Default)
+    cursor.execute(f'''
         CREATE TABLE IF NOT EXISTS leads (
             apollo_id TEXT PRIMARY KEY,
             first_name TEXT,
@@ -77,14 +82,14 @@ def init_db():
             title TEXT,
             organization_name TEXT,
             email TEXT,
-            is_enriched BOOLEAN DEFAULT 0,
+            is_enriched BOOLEAN DEFAULT {bool_default},
             apollo_data TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
     
-    # Join table
-    execute('''
+    # 6. Basket Leads
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS basket_leads (
             basket_id INTEGER,
             lead_id TEXT,
@@ -93,18 +98,27 @@ def init_db():
         )
     ''')
     
-    # Logs
-    execute('''
-        CREATE TABLE IF NOT EXISTS credit_logs (
-            id SERIAL PRIMARY KEY if NOT EXISTS id,
-            user_email TEXT,
-            action TEXT,
-            credit_spent INTEGER,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    if not DATABASE_URL:
-        execute('CREATE TABLE IF NOT EXISTS credit_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_email TEXT, action TEXT, credit_spent INTEGER, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
+    # 7. Credit Logs (Fix Serial Syntax)
+    if DATABASE_URL:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS credit_logs (
+                id SERIAL PRIMARY KEY,
+                user_email TEXT,
+                action TEXT,
+                credit_spent INTEGER,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+    else:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS credit_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_email TEXT,
+                action TEXT,
+                credit_spent INTEGER,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
 
     if not DATABASE_URL: conn.commit()
     conn.close()
