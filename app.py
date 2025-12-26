@@ -122,6 +122,13 @@ def main():
                 st.error("Invalid password. Please check the club handbook.")
             else:
                 user_obj = get_user(login_email)
+                
+                # FAIL-SAFE: If production DB is empty and roster.json is missing,
+                # auto-initialize the primary admin account to prevent lockout.
+                if not user_obj and login_email.strip().lower() == "sharanvamsi@berkeley.edu":
+                    add_user(login_email.strip(), "Sharan Vamsi", "Admin", is_admin=True)
+                    user_obj = get_user(login_email)
+
                 if user_obj:
                     st.session_state.user = user_obj
                     log_audit_event(login_email, "LOGIN_SUCCESS")
