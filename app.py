@@ -27,7 +27,11 @@ if SENTRY_DSN:
     )
 
 # --- CONFIGURATION ---
-st.set_page_config(page_title="ABA Sourcing", layout="wide")
+st.set_page_config(
+    page_title="ABA Sourcing | Premium Talent Search",
+    page_icon="🧪",
+    layout="wide"
+)
 
 # Premium CSS
 st.markdown("""
@@ -55,27 +59,12 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-ROSTER_FILE = "roster.json"
-BLACKLIST_FILE = "blacklist.json"
-KEYS_FILE = "keys.json"
+# --- STARTUP CHECK ---
+if not check_environment():
+    st.error("### 🛑 Configuration Error")
+    st.warning("Critical environment variables are missing. The application may not function correctly. Please check your **Sentry** dashboard or server logs for details.")
 
 # --- HELPER FUNCTIONS ---
-def load_json(filepath, default=[]):
-    if not os.path.exists(filepath):
-        return default
-    with open(filepath, "r") as f:
-        try:
-            return json.load(f)
-        except Exception as e:
-            # Only log if it's not a simple 'File Not Found'
-            if not isinstance(e, FileNotFoundError):
-                sentry_sdk.capture_exception(e)
-            return default
-
-def save_json(filepath, data):
-    with open(filepath, "w") as f:
-        json.dump(data, f, indent=4)
-
 def check_blacklist(domain, blacklist):
     if not domain:
         return False
@@ -84,21 +73,6 @@ def check_blacklist(domain, blacklist):
         if blocked.lower() in domain_lower:
             return True
     return False
-
-def migrate_configs_to_db():
-    """One-time migration of blacklist and domain cache to DB."""
-    # 1. Blacklist
-    if not get_blacklist():
-        local_blacklist = load_json(BLACKLIST_FILE)
-        for domain in local_blacklist:
-            add_to_blacklist(domain)
-    
-    # 2. Domain Cache (Only if DB cache is empty)
-    # We'll check via a direct query for speed
-    if not query("SELECT 1 FROM domain_cache LIMIT 1"):
-        local_cache = load_json("domain_cache.json", default={})
-        for name, domain in local_cache.items():
-            update_domain_cache(name, domain)
 
 # --- STATE INITIALIZATION ---
 if "user" not in st.session_state:
@@ -116,17 +90,11 @@ if "enriched" not in st.session_state:
 
 # --- MAIN APP ---
 def main():
-    st.title("ABA Sourcing Tool")
-
-    # 1. LOAD CONFIG DATA
+    # 1. INITIALIZE DB
     init_db()
     
-    # Run Seeding logic
-    roster = load_json(ROSTER_FILE) # Local fallback
-    migrate_roster_to_db(roster)
-    migrate_configs_to_db()
-    
-    # Fetch active blacklist from DB
+    # Fetch active profiles and settings from DB
+    # (Note: For local-to-cloud migration, use the cloud_sync.py utility)
     blacklist = get_blacklist()
 
     # 2. LOGIN SCREEN

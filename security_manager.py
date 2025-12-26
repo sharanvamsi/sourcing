@@ -8,7 +8,7 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 # --- ENCRYPTION SETUP ---
 # We use a MASTER_KEY from environment variables to encrypt/decrypt individual user keys.
 # If no key is found, we generate one (though this would break decryption on reboot if not saved).
-MASTER_SECRET = os.getenv("MASTER_ENCRYPTION_SECRET", "club-safety-first-12345")
+MASTER_SECRET = os.getenv("MASTER_ENCRYPTION_SECRET")
 
 def get_encryption_key():
     """Derives a stable 32-byte key from the master secret."""

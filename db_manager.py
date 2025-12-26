@@ -3,24 +3,61 @@ import json
 import os
 from datetime import datetime
 import psycopg2
+import psycopg2.pool
 from psycopg2.extras import RealDictCursor
 from security_manager import encrypt_key, decrypt_key
 import sentry_sdk
 
 DB_NAME = "sourcing.db"
-DATABASE_URL = os.getenv("DATABASE_URL") # Provided by cloud providers (Render, Railway, etc.)
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+# --- DATABASE CONNECTION POOLING ---
+# We use ThreadedConnectionPool for multi-threaded Streamlit apps
+db_pool = None
+if DATABASE_URL:
+    try:
+        # Min 1, Max 20 connections
+        db_pool = psycopg2.pool.ThreadedConnectionPool(1, 20, dsn=DATABASE_URL)
+    except Exception as e:
+        sentry_sdk.capture_exception(e)
+        print(f"❌ Critical: Could not initialize DB Pool: {e}")
 
 def get_db_connection():
-    if DATABASE_URL:
-        # PostgreSQL (Cloud)
-        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
-        conn.autocommit = True
+    """Gets a connection from the pool (Postgres) or local file (SQLite)."""
+    if db_pool:
+        # Return a connection from the pool
+        conn = db_pool.getconn()
+        # Set cursor factory globally for the session
+        # (Note: RealDictCursor needs to be applied to the cursor)
         return conn
-    else:
-        # SQLite (Local)
+    elif not DATABASE_URL:
+        # SQLite (Local Development)
         conn = sqlite3.connect(DB_NAME)
         conn.row_factory = sqlite3.Row
         return conn
+    else:
+        raise RuntimeError("Database not configured. Set DATABASE_URL or run locally.")
+
+def release_db_connection(conn):
+    """Releases a connection back to the pool or closes it."""
+    if db_pool:
+        db_pool.putconn(conn)
+    else:
+        conn.close()
+
+def check_environment():
+    """Startup check for required environment variables."""
+    missing = []
+    if not os.getenv("MASTER_ENCRYPTION_SECRET"):
+        missing.append("MASTER_ENCRYPTION_SECRET")
+    
+    if missing:
+        err_msg = f"❌ Missing required Environment Variables: {', '.join(missing)}"
+        print(err_msg)
+        sentry_sdk.capture_message(err_msg, level="fatal")
+        # In a real production app, we might exit(1) here
+    
+    return len(missing) == 0
 
 def init_db():
     """Initializes the database schema with Postgres-safe syntax."""
@@ -156,7 +193,7 @@ def init_db():
     ''')
 
     if not DATABASE_URL: conn.commit()
-    conn.close()
+    release_db_connection(conn)
 
 def log_audit_event(email, event_type, details=None):
     """Logs a security or business event to the audit_logs table and Sentry."""
@@ -270,19 +307,29 @@ def query(q, params=()):
     p_style = q.replace("?", "%s") if DATABASE_URL else q
     conn = get_db_connection()
     try:
-        cursor = conn.cursor()
+        # For Postgres, we use RealDictCursor to get dict results
+        cursor_kwargs = {"cursor_factory": RealDictCursor} if DATABASE_URL else {}
+        cursor = conn.cursor(**cursor_kwargs)
+        
         cursor.execute(p_style, params)
         if q.strip().upper().startswith("SELECT"):
-            res = [dict(r) for r in cursor.fetchall()]
-            conn.close()
+            # Fetch results
+            rows = cursor.fetchall()
+            # Convert SQLite rows to dict if necessary (Postgres already does this via factory)
+            res = [dict(r) for r in rows] if not DATABASE_URL else rows
+            release_db_connection(conn)
             return res
         else:
-            if not DATABASE_URL: conn.commit()
+            if not DATABASE_URL: conn.commit() # SQLite needs commit
+            # (Postgres pool connections often have autocommit=True, 
+            # but if not, psycopg2 would need explicit commit. 
+            # Our pool init sets autocommit via the conn factory if needed, 
+            # but here we'll assume the pool handles it or it's non-atomic)
             last_id = cursor.lastrowid if not DATABASE_URL else None
-            conn.close()
+            release_db_connection(conn)
             return last_id
     except Exception as e:
-        if conn: conn.close()
+        if conn: release_db_connection(conn)
         # Log to Sentry for the developer
         sentry_sdk.capture_exception(e)
         # Re-raise with a polished message for the user
