@@ -9,7 +9,8 @@ from experiment_enrich import enrich_people
 from db_manager import (
     init_db, sync_roster, get_basket_leads, add_lead_to_basket, 
     clear_basket, update_lead_enrichment, log_credit_usage, is_lead_sourced_by_team,
-    save_user_keys, get_user_keys, query, log_audit_event
+    save_user_keys, get_user_keys, query, log_audit_event,
+    get_user, get_all_users, add_user, migrate_roster_to_db
 )
 
 # --- SENTRY INITIALIZATION ---
@@ -99,8 +100,9 @@ def main():
 
     # 1. LOAD CONFIG DATA
     init_db()
-    roster = load_json(ROSTER_FILE)
+    roster = load_json(ROSTER_FILE) # Local fallback
     sync_roster(roster)
+    migrate_roster_to_db(roster) # Ensure DB is seeded from JSON if empty
     
     blacklist = load_json(BLACKLIST_FILE)
 
@@ -119,7 +121,7 @@ def main():
                 log_audit_event(login_email, "LOGIN_FAILED", "Invalid club password")
                 st.error("Invalid password. Please check the club handbook.")
             else:
-                user_obj = next((p for p in roster if p.get('email', '').lower() == login_email.strip().lower()), None)
+                user_obj = get_user(login_email)
                 if user_obj:
                     st.session_state.user = user_obj
                     log_audit_event(login_email, "LOGIN_SUCCESS")
@@ -127,8 +129,8 @@ def main():
                     st.session_state.basket = get_basket_leads(user_obj['email'])
                     st.rerun()
                 else:
-                    log_audit_event(login_email, "LOGIN_FAILED", "Email not in roster")
-                    st.error("Email not found in the roster.")
+                    log_audit_event(login_email, "LOGIN_FAILED", "Email not in database")
+                    st.error("Email not found in the roster. Please contact your administrator.")
         return
 
     # 3. API CONFIGURATION SCREEN
@@ -456,6 +458,25 @@ def main():
             st.subheader("Global Blacklist")
             st.write(", ".join(blacklist))
             
+            st.divider()
+            st.subheader("User Management")
+            with st.expander("Add/Update Member"):
+                with st.form("add_user_form"):
+                    nu_email = st.text_input("Member Email")
+                    nu_name = st.text_input("Full Name")
+                    nu_team = st.text_input("Team Name")
+                    nu_admin = st.checkbox("Is Administrator?")
+                    if st.form_submit_button("Save Member"):
+                        if nu_email and nu_name:
+                            add_user(nu_email, nu_name, nu_team, nu_admin)
+                            st.success(f"User {nu_name} updated in database!")
+                            st.rerun()
+                        else:
+                            st.error("Email and Name are required.")
+            
+            users = get_all_users()
+            st.dataframe(pd.DataFrame(users), use_container_width=True)
+
             st.divider()
             st.subheader("Security Feed (Audit Logs)")
             audit_data = query("SELECT timestamp, user_email, event_type, details FROM audit_logs ORDER BY timestamp DESC LIMIT 20")

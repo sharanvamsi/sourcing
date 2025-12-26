@@ -5,6 +5,7 @@ from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from security_manager import encrypt_key, decrypt_key
+import sentry_sdk
 
 DB_NAME = "sourcing.db"
 DATABASE_URL = os.getenv("DATABASE_URL") # Provided by cloud providers (Render, Railway, etc.)
@@ -146,9 +147,49 @@ def init_db():
     conn.close()
 
 def log_audit_event(email, event_type, details=None):
-    """Logs a security or business event to the audit_logs table."""
+    """Logs a security or business event to the audit_logs table and Sentry."""
     query("INSERT INTO audit_logs (user_email, event_type, details) VALUES (?, ?, ?)", 
           (email, event_type, details))
+    
+    # Also send to Sentry for external visibility (Audit Portability)
+    if "LOGIN" in event_type:
+        with sentry_sdk.configure_scope() as scope:
+            scope.set_user({"email": email})
+            scope.set_context("audit_event", {
+                "event_type": event_type,
+                "details": details
+            })
+            sentry_sdk.capture_message(f"Audit Event: {event_type} - {email}", level="info")
+
+def get_all_users():
+    """Retrieves all users from the database."""
+    return query("SELECT email, name, team_name, is_admin FROM users ORDER BY name")
+
+def get_user(email):
+    """Retrieves a single user by email."""
+    res = query("SELECT email, name, team_name, is_admin FROM users WHERE email = ?", (email.lower().strip(),))
+    return res[0] if res else None
+
+def add_user(email, name, team_name, is_admin=False):
+    """Adds or updates a user in the database roster."""
+    query('''
+        INSERT INTO users (email, name, team_name, is_admin)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(email) DO UPDATE SET 
+            name=EXCLUDED.name, 
+            team_name=EXCLUDED.team_name, 
+            is_admin=EXCLUDED.is_admin
+    ''', (email, name, team_name, 1 if is_admin else 0))
+    log_audit_event(email, "USER_ROSTER_UPDATED", f"User {name} added/updated via DB")
+
+def migrate_roster_to_db(roster_data):
+    """Migrates users from roster.json into the DB Users table."""
+    users_in_db = get_all_users()
+    if not users_in_db:
+        for entry in roster_data:
+            add_user(entry['email'], entry['name'], entry['team_name'], is_admin=(entry['email'] == "sharanvamsi@berkeley.edu"))
+        return True
+    return False
 
 # --- KEY PERSISTENCE (ENCRYPTED) ---
 
