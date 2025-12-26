@@ -426,6 +426,7 @@ def main():
                     except Exception as e:
                         st.error(f"❌ Enrichment Failed: {e}")
                         st.info("Your basket has been preserved. Please check your **Bulk Match API Key** in settings.")
+                        sentry_sdk.capture_exception(e)
 
             if st.session_state.get('enriched', False):
                 # CSV output: first name, last name, company, title and email
