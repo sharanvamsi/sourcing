@@ -537,8 +537,7 @@ if __name__ == "__main__":
     except Exception as e:
         # Hide raw tracebacks for a professional experience
         st.error("### 🏗️ Something went wrong")
-        st.write("The application encountered an unexpected error. Our technical team has been notified via Sentry.")
-        st.info("Please try refreshing the page. if the issue persists, contact Sharan Vamsi.")
+        st.write("The application encountered an unexpected error. Please try again later.")
         
         # We don't need to manually capture here since Sentry's SDK 
         # usually handles unhandled exceptions, but just in case:
