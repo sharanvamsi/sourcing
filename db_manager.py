@@ -340,7 +340,7 @@ def update_lead_enrichment(apollo_id, enriched_data):
     query('''
         UPDATE leads SET email = ?, first_name = ?, last_name = ?, is_enriched = ?, apollo_data = ?
         WHERE apollo_id = ?
-    ''', (enriched_data.get('email'), enriched_data.get('first_name'), enriched_data.get('last_name'), is_enriched_val, json.dumps(enriched_data), apollo_id))
+    ''', (enriched_data.get('email'), enriched_data.get('first_name'), enriched_data.get('last_name'), is_enriched_val, json.dumps(enriched_data, default=str), apollo_id))
 
 def log_credit_usage(user_email, action, credits):
     query("INSERT INTO credit_logs (user_email, action, credit_spent) VALUES (?, ?, ?)", (user_email, action, credits))
