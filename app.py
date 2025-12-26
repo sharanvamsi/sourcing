@@ -12,7 +12,7 @@ from db_manager import (
     save_user_keys, get_user_keys, query, log_audit_event,
     get_user, get_all_users, add_user, migrate_roster_to_db,
     get_blacklist, add_to_blacklist, remove_from_blacklist,
-    get_cached_domain, update_domain_cache
+    get_cached_domain, update_domain_cache, check_environment
 )
 
 # --- SENTRY INITIALIZATION ---

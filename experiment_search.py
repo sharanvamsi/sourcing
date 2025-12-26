@@ -43,7 +43,7 @@ def search_people(domain=None, job_titles=None, locations=None, seniority=None, 
     payload = {k: v for k, v in payload.items() if v is not None}
 
     try:
-        response = requests.post(url, headers=headers, json=payload)
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
         
         if response.status_code == 200:
             data = response.json()
@@ -64,10 +64,12 @@ def search_people(domain=None, job_titles=None, locations=None, seniority=None, 
         else:
             print(f"Error: {response.status_code}")
             print(response.text)
+            return []
             
     except Exception as e:
         sentry_sdk.capture_exception(e)
         print(f"An error occurred: {e}")
+        return []
 
 if __name__ == "__main__":
     print("\nXXX TEST 1: Standard Search (Company Name 'Google' -> should resolve to google.com) XXX")

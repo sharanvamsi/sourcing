@@ -206,7 +206,14 @@ def init_db():
         )
     ''')
 
-    if not DATABASE_URL: conn.commit()
+    if DATABASE_URL:
+        try:
+            conn.commit()
+        except Exception as commit_error:
+            conn.rollback()
+            raise commit_error
+    else:
+        conn.commit()
     release_db_connection(conn)
 
 def log_audit_event(email, event_type, details=None):
@@ -307,10 +314,19 @@ def get_user_keys(email):
         return None
     
     r = rows[0]
+    mixed_key = decrypt_key(r.get("mixed_people_key_enc"))
+    bulk_key = decrypt_key(r.get("bulk_match_key_enc"))
+    org_key = decrypt_key(r.get("org_search_key_enc"))
+    
+    # Check if any decryption failed
+    if not all([mixed_key, bulk_key, org_key]):
+        sentry_sdk.capture_message(f"Failed to decrypt keys for user {email}", level="warning")
+        return None
+    
     return {
-        "MIXED_PEOPLE_API_KEY": decrypt_key(r.get("mixed_people_key_enc")),
-        "BULK_MATCH_API_KEY": decrypt_key(r.get("bulk_match_key_enc")),
-        "ORG_SEARCH_API_KEY": decrypt_key(r.get("org_search_key_enc"))
+        "MIXED_PEOPLE_API_KEY": mixed_key,
+        "BULK_MATCH_API_KEY": bulk_key,
+        "ORG_SEARCH_API_KEY": org_key
     }
 
 
@@ -334,16 +350,27 @@ def query(q, params=()):
             release_db_connection(conn)
             return res
         else:
-            if not DATABASE_URL: conn.commit() # SQLite needs commit
-            # (Postgres pool connections often have autocommit=True, 
-            # but if not, psycopg2 would need explicit commit. 
-            # Our pool init sets autocommit via the conn factory if needed, 
-            # but here we'll assume the pool handles it or it's non-atomic)
+            if DATABASE_URL:
+                # PostgreSQL: Explicit commit for write operations
+                try:
+                    conn.commit()
+                except Exception as commit_error:
+                    conn.rollback()
+                    raise commit_error
+            else:
+                # SQLite needs commit
+                conn.commit()
             last_id = cursor.lastrowid if not DATABASE_URL else None
             release_db_connection(conn)
             return last_id
     except Exception as e:
-        if conn: release_db_connection(conn)
+        if conn:
+            try:
+                if DATABASE_URL:
+                    conn.rollback()
+            except Exception:
+                pass  # Ignore rollback errors
+            release_db_connection(conn)
         # Log to Sentry for the developer
         sentry_sdk.capture_exception(e)
         # Re-raise with a polished message for the user
@@ -375,7 +402,13 @@ def get_basket_leads(user_email):
         lead = dict(r)
         # Convert datetime objects to strings before processing
         lead = convert_datetime_to_str(lead)
-        if lead['apollo_data']: lead.update(json.loads(lead['apollo_data']))
+        if lead.get('apollo_data'): 
+            try:
+                lead.update(json.loads(lead['apollo_data']))
+            except (json.JSONDecodeError, TypeError) as e:
+                # Log error but continue processing other leads
+                sentry_sdk.capture_exception(e)
+                print(f"Warning: Failed to parse apollo_data for lead {lead.get('apollo_id')}: {e}")
         results.append(lead)
     return results
 
@@ -399,6 +432,8 @@ def clear_basket(user_email):
     if rows: query("DELETE FROM basket_leads WHERE basket_id = ?", (rows[0]['id'],))
 
 def update_lead_enrichment(apollo_id, enriched_data):
+    if not apollo_id:
+        raise ValueError("apollo_id is required for update_lead_enrichment")
     is_enriched_val = True if DATABASE_URL else 1
     # Convert datetime objects to strings before JSON serialization
     serializable_data = convert_datetime_to_str(enriched_data)
