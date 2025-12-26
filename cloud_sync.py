@@ -1,11 +1,17 @@
 import os
 import json
 import psycopg2
+import sentry_sdk
 from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
 
 # Load local environment if exists
 load_dotenv()
+
+# Sentry Init for local diagnostics
+SENTRY_DSN = os.getenv("SENTRY_DSN")
+if SENTRY_DSN:
+    sentry_sdk.init(dsn=SENTRY_DSN)
 
 def push_to_cloud():
     print("🚀 ABA Sourcing Cloud Sync Utility")
@@ -57,6 +63,7 @@ def push_to_cloud():
         print("You can now log in at your Railway URL.")
 
     except Exception as e:
+        sentry_sdk.capture_exception(e)
         print(f"❌ Error during sync: {e}")
 
 if __name__ == "__main__":

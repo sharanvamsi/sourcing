@@ -1,6 +1,7 @@
 import os
 import requests
 import json
+import sentry_sdk
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -68,6 +69,7 @@ def find_company_domain(company_name):
             return None
             
     except Exception as e:
+        sentry_sdk.capture_exception(e)
         print(f"An error occurred: {e}")
         return None
 

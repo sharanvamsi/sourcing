@@ -1,5 +1,6 @@
 from cryptography.fernet import Fernet
 import os
+import sentry_sdk
 import base64
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -23,13 +24,18 @@ def get_encryption_key():
 
 def encrypt_key(plain_text):
     if not plain_text: return None
-    f = Fernet(get_encryption_key())
-    return f.encrypt(plain_text.encode()).decode()
+    try:
+        f = Fernet(get_encryption_key())
+        return f.encrypt(plain_text.encode()).decode()
+    except Exception as e:
+        sentry_sdk.capture_exception(e)
+        return None
 
 def decrypt_key(encrypted_text):
     if not encrypted_text: return None
     try:
         f = Fernet(get_encryption_key())
         return f.decrypt(encrypted_text.encode()).decode()
-    except:
+    except Exception as e:
+        sentry_sdk.capture_exception(e)
         return None # Decryption failed (wrong master key or corrupted data)

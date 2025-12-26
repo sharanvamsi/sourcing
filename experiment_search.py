@@ -1,6 +1,7 @@
 import os
 import requests
 import json
+import sentry_sdk
 from dotenv import load_dotenv
 from experiment_org_search import find_company_domain
 
@@ -66,6 +67,7 @@ def search_people(domain=None, job_titles=None, locations=None, seniority=None, 
             print(response.text)
             
     except Exception as e:
+        sentry_sdk.capture_exception(e)
         print(f"An error occurred: {e}")
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 import os
 import requests
 import json
+import sentry_sdk
 import math
 from dotenv import load_dotenv
 from experiment_search import search_people
@@ -51,6 +52,7 @@ def enrich_people(people_list):
                 # RAISE instead of print, so UI can catch it
                 raise Exception(f"Apollo API Error {response.status_code}: {response.text}")
         except Exception as e:
+            sentry_sdk.capture_exception(e)
             # Re-raise so the UI knows enrichment failed
             raise e
 
