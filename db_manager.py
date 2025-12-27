@@ -422,6 +422,10 @@ def get_user_keys(email):
     
     return api_key
 
+def delete_user_keys(email):
+    """Deletes API key for a user from the database."""
+    query("DELETE FROM user_keys WHERE user_email = ?", (email,))
+
 
 # --- REST OF THE LOGIC (WITH PARAM STYLE FIX) ---
 

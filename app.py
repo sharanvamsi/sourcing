@@ -9,7 +9,7 @@ from experiment_enrich import enrich_people
 from db_manager import (
     init_db, sync_roster, get_basket_leads, add_lead_to_basket, 
     clear_basket, update_lead_enrichment, log_credit_usage, is_lead_sourced_by_team,
-    save_user_keys, get_user_keys, query, log_audit_event,
+    save_user_keys, get_user_keys, delete_user_keys, query, log_audit_event,
     get_user, get_all_users, add_user, migrate_roster_to_db,
     get_blacklist, add_to_blacklist, remove_from_blacklist,
     get_cached_domain, update_domain_cache, check_environment
@@ -202,7 +202,14 @@ def main():
             
         st.divider()
         if st.button("Reset API Keys"):
+            user_email = st.session_state.user.get('email')
+            # Delete from database
+            delete_user_keys(user_email)
+            # Clear session state
             st.session_state.api_keys = None
+            # Log the action
+            log_audit_event(user_email, "API_KEYS_RESET", "User reset their API keys")
+            st.success("API keys have been reset. Please enter a new API key to continue.")
             st.rerun()
 
     # Tabs
