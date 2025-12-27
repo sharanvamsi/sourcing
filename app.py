@@ -107,11 +107,14 @@ def main():
         if st.button("Sign In", type="primary"):
             if not login_email or not login_pass:
                 st.warning("Please enter your email and password.")
-            elif login_pass != "club2025": # Simple shared password for club early access
-                log_audit_event(login_email, "LOGIN_FAILED", "Invalid club password")
-                st.error("Invalid password. Please check the club handbook.")
             else:
-                user_obj = get_user(login_email)
+                # Get password from environment variable, fallback to default for backward compatibility
+                expected_password = os.getenv("CLUB_PASSWORD", "club2025")
+                if login_pass != expected_password:
+                    log_audit_event(login_email, "LOGIN_FAILED", "Invalid club password")
+                    st.error("Invalid password. Please check the club handbook.")
+                else:
+                    user_obj = get_user(login_email)
 
                 if user_obj:
                     st.session_state.user = user_obj
@@ -135,39 +138,31 @@ def main():
     user_email = st.session_state.user.get('email')
     
     if not st.session_state.api_keys:
-        # Check if we have saved keys for this user (Now Decrypted from DB)
-        saved_keys = get_user_keys(user_email)
-        if saved_keys and all(saved_keys.values()):
-            st.session_state.api_keys = saved_keys
+        # Check if we have saved key for this user (Now Decrypted from DB)
+        saved_key = get_user_keys(user_email)
+        if saved_key:
+            st.session_state.api_keys = saved_key
             st.rerun()
         
         st.header("API Configuration")
-        st.info(f"Welcome, {st.session_state.user['name']}. Please provide your individual Apollo API keys to continue.")
+        st.info(f"Welcome, {st.session_state.user['name']}. Please provide your Apollo API key to continue.")
+        st.caption("Your API key will be encrypted and stored securely. It will be used for all Apollo API operations (search, enrichment, and organization lookup).")
         
         with st.form("keys_form"):
-            k_search = st.text_input("Search API Key (MIXED_PEOPLE)", type="password")
-            k_bulk = st.text_input("Bulk Match API Key (BULK_MATCH)", type="password")
-            k_org = st.text_input("Org Search API Key (ORG_SEARCH)", type="password")
+            api_key = st.text_input("Apollo API Key", type="password", help="Enter your Apollo.io API key. This single key will be used for all operations.")
             
             if st.form_submit_button("Save & Continue"):
-                if not (k_search and k_bulk and k_org):
-                    st.error("All 3 keys are required.")
+                if not api_key:
+                    st.error("API key is required.")
                 else:
-                    new_keys = {
-                        "MIXED_PEOPLE_API_KEY": k_search,
-                        "BULK_MATCH_API_KEY": k_bulk,
-                        "ORG_SEARCH_API_KEY": k_org
-                    }
-                    st.session_state.api_keys = new_keys
                     # Persist Encrypted in DB
-                    save_user_keys(user_email, new_keys)
+                    save_user_keys(user_email, api_key)
+                    st.session_state.api_keys = api_key
                     st.rerun()
         return
 
-    # Set Environment Variables for scripts to pick up
-    os.environ["MIXED_PEOPLE_API_KEY"] = st.session_state.api_keys["MIXED_PEOPLE_API_KEY"]
-    os.environ["BULK_MATCH_API_KEY"] = st.session_state.api_keys["BULK_MATCH_API_KEY"]
-    os.environ["ORG_SEARCH_API_KEY"] = st.session_state.api_keys["ORG_SEARCH_API_KEY"]
+    # Set Environment Variable for scripts to pick up
+    os.environ["APOLLO_API_KEY"] = st.session_state.api_keys
 
     # 4. DASHBOARD
     

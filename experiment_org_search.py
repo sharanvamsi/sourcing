@@ -19,10 +19,10 @@ def find_company_domain(company_name):
         
     print(f"Searching for domain of company: '{company_name}'...")
     
-    # Use the same key as search/enrich, assuming it has permissions
-    api_key = os.getenv("ORG_SEARCH_API_KEY")
+    # Use the same key as search/enrich
+    api_key = os.getenv("APOLLO_API_KEY")
     if not api_key:
-        print("Error: ORG_SEARCH_API_KEY not found in environment variables.")
+        print("Error: APOLLO_API_KEY not found in environment variables.")
         return None
 
     url = "https://api.apollo.io/v1/organizations/search"

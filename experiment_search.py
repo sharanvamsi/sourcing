@@ -16,10 +16,10 @@ def search_people(domain=None, job_titles=None, locations=None, seniority=None, 
         else:
             print(f"Warning: Could not resolve domain for '{domain}'. Using as is.")
     
-    api_key = os.getenv("MIXED_PEOPLE_API_KEY")
+    api_key = os.getenv("APOLLO_API_KEY")
     if not api_key:
-        print("Error: MIXED_PEOPLE_API_KEY not found in environment variables.")
-        return
+        print("Error: APOLLO_API_KEY not found in environment variables.")
+        return []
 
     url = "https://api.apollo.io/v1/mixed_people/api_search"
     

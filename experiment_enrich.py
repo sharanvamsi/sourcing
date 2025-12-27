@@ -61,9 +61,9 @@ def enrich_people(people_list, max_workers=5):
     Returns:
         List of enriched people with emails revealed
     """
-    api_key = os.getenv("BULK_MATCH_API_KEY") or os.getenv("MIXED_PEOPLE_API_KEY")
+    api_key = os.getenv("APOLLO_API_KEY")
     if not api_key:
-        error_msg = "Error: No API Key found for enrichment."
+        error_msg = "Error: APOLLO_API_KEY not found for enrichment."
         print(error_msg)
         sentry_sdk.capture_message(error_msg, level="error")
         raise ValueError(error_msg)

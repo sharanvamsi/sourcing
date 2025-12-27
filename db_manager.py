@@ -73,6 +73,72 @@ def check_environment():
     
     return len(missing) == 0
 
+def migrate_user_keys_schema():
+    """Migrates user_keys table from 3-key schema to single-key schema."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Check if old columns exist
+        if DATABASE_URL:
+            cursor.execute("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='user_keys' AND column_name='mixed_people_key_enc'
+            """)
+            has_old_schema = cursor.fetchone() is not None
+        else:
+            # SQLite check
+            cursor.execute("PRAGMA table_info(user_keys)")
+            columns = [row[1] for row in cursor.fetchall()]
+            has_old_schema = 'mixed_people_key_enc' in columns
+        
+        if has_old_schema:
+            # Migrate: Use the first available key (prefer MIXED_PEOPLE as it's most commonly used)
+            if DATABASE_URL:
+                # First ensure new column exists
+                try:
+                    cursor.execute("ALTER TABLE user_keys ADD COLUMN IF NOT EXISTS apollo_api_key_enc TEXT")
+                except:
+                    pass  # Column might already exist
+                
+                cursor.execute("""
+                    UPDATE user_keys 
+                    SET apollo_api_key_enc = COALESCE(mixed_people_key_enc, bulk_match_key_enc, org_search_key_enc)
+                    WHERE apollo_api_key_enc IS NULL
+                """)
+                cursor.execute("""
+                    ALTER TABLE user_keys 
+                    DROP COLUMN IF EXISTS mixed_people_key_enc,
+                    DROP COLUMN IF EXISTS bulk_match_key_enc,
+                    DROP COLUMN IF EXISTS org_search_key_enc
+                """)
+                conn.commit()
+            else:
+                # SQLite doesn't support DROP COLUMN easily, so we'll recreate the table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS user_keys_new (
+                        user_email TEXT PRIMARY KEY,
+                        apollo_api_key_enc TEXT,
+                        FOREIGN KEY (user_email) REFERENCES users (email)
+                    )
+                """)
+                cursor.execute("""
+                    INSERT INTO user_keys_new (user_email, apollo_api_key_enc)
+                    SELECT user_email, COALESCE(mixed_people_key_enc, bulk_match_key_enc, org_search_key_enc)
+                    FROM user_keys
+                """)
+                cursor.execute("DROP TABLE user_keys")
+                cursor.execute("ALTER TABLE user_keys_new RENAME TO user_keys")
+                conn.commit()
+            
+            print("✅ Migrated user_keys table to single-key schema")
+        
+        release_db_connection(conn)
+    except Exception as e:
+        sentry_sdk.capture_exception(e)
+        print(f"⚠️  Migration warning: {e}")
+
 def init_db():
     """Initializes the database schema with Postgres-safe syntax."""
     conn = get_db_connection()
@@ -100,9 +166,7 @@ def init_db():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS user_keys (
             user_email TEXT PRIMARY KEY,
-            mixed_people_key_enc TEXT,
-            bulk_match_key_enc TEXT,
-            org_search_key_enc TEXT,
+            apollo_api_key_enc TEXT,
             FOREIGN KEY (user_email) REFERENCES users (email)
         )
     ''')
@@ -215,6 +279,9 @@ def init_db():
     else:
         conn.commit()
     release_db_connection(conn)
+    
+    # Run migration for user_keys schema if needed
+    migrate_user_keys_schema()
 
 def log_audit_event(email, event_type, details=None):
     """Logs a security or business event to the audit_logs table and Sentry."""
@@ -291,43 +358,33 @@ def update_domain_cache(company_name, domain):
 
 # --- KEY PERSISTENCE (ENCRYPTED) ---
 
-def save_user_keys(email, keys_dict):
-    """Saves encrypted API keys for a user using the safe query helper."""
+def save_user_keys(email, api_key):
+    """Saves encrypted API key for a user using the safe query helper."""
     query('''
-        INSERT INTO user_keys (user_email, mixed_people_key_enc, bulk_match_key_enc, org_search_key_enc)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO user_keys (user_email, apollo_api_key_enc)
+        VALUES (?, ?)
         ON CONFLICT (user_email) DO UPDATE SET
-            mixed_people_key_enc = EXCLUDED.mixed_people_key_enc,
-            bulk_match_key_enc = EXCLUDED.bulk_match_key_enc,
-            org_search_key_enc = EXCLUDED.org_search_key_enc
+            apollo_api_key_enc = EXCLUDED.apollo_api_key_enc
     ''', (
         email,
-        encrypt_key(keys_dict.get("MIXED_PEOPLE_API_KEY")),
-        encrypt_key(keys_dict.get("BULK_MATCH_API_KEY")),
-        encrypt_key(keys_dict.get("ORG_SEARCH_API_KEY"))
+        encrypt_key(api_key)
     ))
 
 def get_user_keys(email):
-    """Retrieves and decrypts API keys for a user using the safe query helper."""
+    """Retrieves and decrypts API key for a user using the safe query helper."""
     rows = query("SELECT * FROM user_keys WHERE user_email = ?", (email,))
     if not rows: 
         return None
     
     r = rows[0]
-    mixed_key = decrypt_key(r.get("mixed_people_key_enc"))
-    bulk_key = decrypt_key(r.get("bulk_match_key_enc"))
-    org_key = decrypt_key(r.get("org_search_key_enc"))
+    api_key = decrypt_key(r.get("apollo_api_key_enc"))
     
-    # Check if any decryption failed
-    if not all([mixed_key, bulk_key, org_key]):
-        sentry_sdk.capture_message(f"Failed to decrypt keys for user {email}", level="warning")
+    # Check if decryption failed
+    if not api_key:
+        sentry_sdk.capture_message(f"Failed to decrypt API key for user {email}", level="warning")
         return None
     
-    return {
-        "MIXED_PEOPLE_API_KEY": mixed_key,
-        "BULK_MATCH_API_KEY": bulk_key,
-        "ORG_SEARCH_API_KEY": org_key
-    }
+    return api_key
 
 
 # --- REST OF THE LOGIC (WITH PARAM STYLE FIX) ---
