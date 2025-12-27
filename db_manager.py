@@ -139,6 +139,41 @@ def migrate_user_keys_schema():
         sentry_sdk.capture_exception(e)
         print(f"⚠️  Migration warning: {e}")
 
+def migrate_users_schema():
+    """Migrates users table to add is_admin column if it doesn't exist."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Check if is_admin column exists
+        if DATABASE_URL:
+            cursor.execute("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='users' AND column_name='is_admin'
+            """)
+            has_is_admin = cursor.fetchone() is not None
+        else:
+            # SQLite check
+            cursor.execute("PRAGMA table_info(users)")
+            columns = [row[1] for row in cursor.fetchall()]
+            has_is_admin = 'is_admin' in columns
+        
+        if not has_is_admin:
+            # Add is_admin column
+            if DATABASE_URL:
+                cursor.execute("ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT FALSE")
+            else:
+                # SQLite: Add column with default value
+                cursor.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0")
+            conn.commit()
+            print("✅ Added is_admin column to users table")
+        
+        release_db_connection(conn)
+    except Exception as e:
+        sentry_sdk.capture_exception(e)
+        print(f"⚠️  Migration warning: {e}")
+
 def init_db():
     """Initializes the database schema with Postgres-safe syntax."""
     conn = get_db_connection()
@@ -280,8 +315,9 @@ def init_db():
         conn.commit()
     release_db_connection(conn)
     
-    # Run migration for user_keys schema if needed
-    migrate_user_keys_schema()
+    # Run migrations for schema updates
+    migrate_users_schema()  # Add is_admin column if missing
+    migrate_user_keys_schema()  # Migrate user_keys to single-key schema
 
 def log_audit_event(email, event_type, details=None):
     """Logs a security or business event to the audit_logs table and Sentry."""

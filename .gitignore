@@ -8,4 +8,5 @@ sourcing.db
 domain_cache.json
 roster.json
 blacklist.json
+local_errors.log
 

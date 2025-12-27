@@ -14,6 +14,7 @@ from db_manager import (
     get_blacklist, add_to_blacklist, remove_from_blacklist,
     get_cached_domain, update_domain_cache, check_environment
 )
+from local_error_logger import log_error
 
 # --- SENTRY INITIALIZATION ---
 SENTRY_DSN = os.getenv("SENTRY_DSN")
@@ -114,24 +115,35 @@ def main():
                     log_audit_event(login_email, "LOGIN_FAILED", "Invalid club password")
                     st.error("Invalid password. Please check the club handbook.")
                 else:
-                    user_obj = get_user(login_email)
-
-                if user_obj:
-                    st.session_state.user = user_obj
-                    log_audit_event(login_email, "LOGIN_SUCCESS")
-                    # Persistence: Load basket from DB on login
-                    st.session_state.basket = get_basket_leads(user_obj['email'])
-                    st.rerun()
-                else:
-                    log_audit_event(login_email, "LOGIN_FAILED", "Email not in database")
-                    st.error("Email not found in the roster.")
-                    
-                    # Helpful hint for first-time production setup
-                    if not get_all_users():
-                        st.divider()
-                        st.info("💡 **First Time Setup?** It looks like your production database is currently empty. "
-                                "To bootstrap your account, please ensure the `ADMIN_EMAIL` environment variable "
-                                "is set in Railway, or run `python cloud_sync.py` from your local terminal.")
+                    # Password is correct, now check if user exists
+                    try:
+                        user_obj = get_user(login_email)
+                        
+                        if user_obj:
+                            st.session_state.user = user_obj
+                            log_audit_event(login_email, "LOGIN_SUCCESS")
+                            # Persistence: Load basket from DB on login
+                            st.session_state.basket = get_basket_leads(user_obj['email'])
+                            st.rerun()
+                        else:
+                            # User not found in database
+                            error_msg = f"Login attempt failed: Email '{login_email}' not found in database"
+                            log_error(Exception(error_msg), context=f"Login failure - email: {login_email}")
+                            log_audit_event(login_email, "LOGIN_FAILED", "Email not in database")
+                            st.error("Email not found in the roster.")
+                            
+                            # Helpful hint for first-time production setup
+                            if not get_all_users():
+                                st.divider()
+                                st.info("💡 **First Time Setup?** It looks like your production database is currently empty. "
+                                        "To bootstrap your account, please ensure the `ADMIN_EMAIL` environment variable "
+                                        "is set in Railway, or run `python migrate_json_to_db.py` from your local terminal.")
+                    except Exception as e:
+                        # Database error during login
+                        log_error(e, context=f"Login error for email: {login_email}")
+                        log_audit_event(login_email, "LOGIN_FAILED", f"Database error: {str(e)}")
+                        st.error("An error occurred while checking your credentials. Please try again.")
+                        sentry_sdk.capture_exception(e)
         return
 
     # 3. API CONFIGURATION SCREEN
@@ -391,6 +403,8 @@ def main():
                     except Exception as e:
                         st.error(f"❌ Enrichment Failed: {e}")
                         st.info("Your basket has been preserved. Please check your **Bulk Match API Key** in settings.")
+                        # Log error locally for development
+                        log_error(e, context="Enrichment process failed")
                         sentry_sdk.capture_exception(e)
 
             if st.session_state.get('enriched', False):
@@ -504,6 +518,9 @@ if __name__ == "__main__":
         # Hide raw tracebacks for a professional experience
         st.error("### 🏗️ Something went wrong")
         st.write("The application encountered an unexpected error. Please try again later.")
+        
+        # Log error locally for development
+        log_error(e, context="Main application error")
         
         # We don't need to manually capture here since Sentry's SDK 
         # usually handles unhandled exceptions, but just in case:
