@@ -160,6 +160,14 @@ def main():
         st.info(f"Welcome, {st.session_state.user['name']}. Please provide your Apollo API key to continue.")
         st.caption("Your API key will be encrypted and stored securely. It will be used for all Apollo API operations (search, enrichment, and organization lookup).")
         
+        # Logout button
+        if st.button("Logout", type="secondary"):
+            st.session_state.user = None
+            st.session_state.api_keys = None
+            st.session_state.basket = []
+            st.session_state.search_results = []
+            st.rerun()
+        
         with st.form("keys_form"):
             api_key = st.text_input("Apollo API Key", type="password", help="Enter your Apollo.io API key. This single key will be used for all operations.")
             
