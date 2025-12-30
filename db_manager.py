@@ -383,7 +383,9 @@ def init_db():
     
     # Ensure all allowed teams exist
     for team in ALLOWED_TEAMS:
-        cursor.execute("INSERT INTO teams (name) VALUES (?) ON CONFLICT DO NOTHING", (team,))
+        # Use correct placeholder syntax for PostgreSQL vs SQLite
+        sql = "INSERT INTO teams (name) VALUES (%s) ON CONFLICT DO NOTHING" if DATABASE_URL else "INSERT INTO teams (name) VALUES (?) ON CONFLICT DO NOTHING"
+        cursor.execute(sql, (team,))
     
     # 2. Users (Fix Boolean Default) - team_name is NOT NULL with foreign key
     bool_default = "FALSE" if DATABASE_URL else "0"
