@@ -73,7 +73,7 @@ def search_people(domain=None, job_titles=None, locations=None, seniority=None, 
         return []
 
 if __name__ == "__main__":
-    print("\nXXX TEST 1: Standard Search (Company Name 'Google' -> should resolve to google.com) XXX")
+    print("\nTest: Standard Search (Company Name 'Google' -> should resolve to google.com)")
     results = search_people(
         domain="Google", # Testing resolution
         job_titles=["Software Engineer"],
@@ -94,30 +94,3 @@ if __name__ == "__main__":
             print(f"{first_name} {last_name} | {company} | {title}")
     else:
         print("No results found.")
-
-    """
-    print("\nXXX TEST 2: Invalid Domain (should find nothing or error gracefully) XXX")
-    output = search_people(
-        domain="thisdomaindoesnotexist12345.com",
-        job_titles=["Software Engineer"],
-        max_results=3
-    )
-    print(output)
-
-    print("\nXXX TEST 3: Special Characters in Title XXX")
-    output = search_people(
-        domain="google.com",
-        job_titles=["C++ Developer", ".NET Developer"], # Special chars
-        max_results=3
-    )
-    print(output)
-
-    print("\nXXX TEST 4: Empty Locations (should default to world/any) XXX")
-    output = search_people(
-        domain="google.com",
-        job_titles=["CEO"],
-        locations=None,
-        max_results=1
-    )
-    print(output)
-    """
