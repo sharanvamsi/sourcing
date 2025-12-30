@@ -1,4 +1,5 @@
 import os
+from re import search
 import requests
 import sentry_sdk
 from dotenv import load_dotenv
@@ -73,31 +74,50 @@ def search_people(domain=None, job_titles=None, locations=None, seniority=None, 
 
 if __name__ == "__main__":
     print("\nXXX TEST 1: Standard Search (Company Name 'Google' -> should resolve to google.com) XXX")
-    search_people(
+    results = search_people(
         domain="Google", # Testing resolution
         job_titles=["Software Engineer"],
         locations=["San Francisco, CA"],
-        max_results=3
+        max_results=100
     )
+    
+    if results:
+        print(f"\nFound {len(results)} people:\n")
+        for person in results:
+            first_name = person.get('first_name', 'N/A')
+            last_name = person.get('last_name') or person.get('last_name_obfuscated', 'N/A')
+            title = person.get('title', 'N/A')
+            company = 'N/A'
+            if person.get('organization'):
+                company = person['organization'].get('name', 'N/A')
+            
+            print(f"{first_name} {last_name} | {company} | {title}")
+    else:
+        print("No results found.")
 
+    """
     print("\nXXX TEST 2: Invalid Domain (should find nothing or error gracefully) XXX")
-    search_people(
+    output = search_people(
         domain="thisdomaindoesnotexist12345.com",
         job_titles=["Software Engineer"],
         max_results=3
     )
+    print(output)
 
     print("\nXXX TEST 3: Special Characters in Title XXX")
-    search_people(
+    output = search_people(
         domain="google.com",
         job_titles=["C++ Developer", ".NET Developer"], # Special chars
         max_results=3
     )
+    print(output)
 
     print("\nXXX TEST 4: Empty Locations (should default to world/any) XXX")
-    search_people(
+    output = search_people(
         domain="google.com",
         job_titles=["CEO"],
         locations=None,
         max_results=1
     )
+    print(output)
+    """

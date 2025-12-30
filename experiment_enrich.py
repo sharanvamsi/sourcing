@@ -23,7 +23,7 @@ def _enrich_batch(batch, api_key, batch_index):
     
     payload = {
         "details": batch,
-        "reveal_personal_emails": True 
+        "reveal_personal_emails": False 
     }
 
     try:
@@ -115,7 +115,7 @@ def enrich_people(people_list, max_workers=5):
 if __name__ == "__main__":
     # Test script same as before...
     print("STEP 1: SEARCHING...")
-    results = search_people(domain="apple.com", job_titles=["Engineering"], max_results=5)
+    results = search_people(domain="apple.com", job_titles=["Engineering"], max_results=25)
     if results:
         print("STEP 2: ENRICHING...")
         enriched = enrich_people(results)

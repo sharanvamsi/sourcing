@@ -5,6 +5,9 @@ import sentry_sdk
 from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
 
+# Allowed teams - must match db_manager.py
+ALLOWED_TEAMS = ["BD", "Finance", "Marketing", "Strategy", "NPO", "Exec Board"]
+
 # Load local environment if exists
 load_dotenv()
 
@@ -39,14 +42,30 @@ def push_to_cloud():
                 roster = json.load(f)
             
             print(f"📦 Syncing {len(roster)} users...")
+            
+            # Ensure all allowed teams exist
+            for team in ALLOWED_TEAMS:
+                cursor.execute("INSERT INTO teams (name) VALUES (%s) ON CONFLICT DO NOTHING", (team,))
+            
             for user in roster:
                 email = user['email'].lower().strip()
+                team_name = user.get('team_name', '').strip()
                 is_admin = user.get('is_admin', False)
+                
+                # Validate team_name
+                if not team_name:
+                    raise ValueError(f"User {email} has no team_name")
+                if team_name not in ALLOWED_TEAMS:
+                    raise ValueError(f"Invalid team_name '{team_name}' for user {email}. Must be one of: {', '.join(ALLOWED_TEAMS)}")
+                
+                # Ensure team exists
+                cursor.execute("INSERT INTO teams (name) VALUES (%s) ON CONFLICT DO NOTHING", (team_name,))
+                
                 cursor.execute('''
                     INSERT INTO users (email, name, team_name, is_admin)
                     VALUES (%s, %s, %s, %s)
                     ON CONFLICT(email) DO UPDATE SET name=EXCLUDED.name, team_name=EXCLUDED.team_name, is_admin=EXCLUDED.is_admin
-                ''', (email, user['name'], user['team_name'], is_admin))
+                ''', (email, user['name'], team_name, is_admin))
             print("✅ Roster Synced.")
 
         # 2. Migrate Blacklist

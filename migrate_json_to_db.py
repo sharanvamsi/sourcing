@@ -15,7 +15,7 @@ from pathlib import Path
 from db_manager import (
     init_db, add_user, add_to_blacklist, update_domain_cache,
     save_user_keys, get_all_users, get_blacklist, get_cached_domain,
-    get_user_keys
+    get_user_keys, ALLOWED_TEAMS
 )
 from security_manager import encrypt_key
 
@@ -47,10 +47,20 @@ def migrate_roster():
                 continue
             
             name = entry.get('name', '')
-            team_name = entry.get('team_name', '')
+            team_name = entry.get('team_name', '').strip()
             is_admin = entry.get('is_admin', False)
             
-            # Mark Exec Board as admin by default
+            # Validate team_name (defensive check - add_user will also validate)
+            if not team_name:
+                print(f"⚠️  Skipping user {email}: missing team_name")
+                skipped += 1
+                continue
+            if team_name not in ALLOWED_TEAMS:
+                print(f"⚠️  Skipping user {email}: invalid team_name '{team_name}'. Must be one of: {', '.join(ALLOWED_TEAMS)}")
+                skipped += 1
+                continue
+            
+            # Mark Exec Board team as admin by default
             if not is_admin and team_name == "Exec Board":
                 is_admin = True
             

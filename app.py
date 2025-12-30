@@ -8,11 +8,13 @@ from experiment_search import search_people, find_company_domain
 from experiment_enrich import enrich_people
 from db_manager import (
     init_db, sync_roster, get_basket_leads, add_lead_to_basket, 
-    clear_basket, update_lead_enrichment, log_credit_usage, is_lead_sourced_by_team,
+    clear_basket, update_lead_enrichment, log_credit_usage,
     save_user_keys, get_user_keys, delete_user_keys, query, log_audit_event,
     get_user, get_all_users, add_user, migrate_roster_to_db,
     get_blacklist, add_to_blacklist, remove_from_blacklist,
-    get_cached_domain, update_domain_cache, check_environment
+    get_cached_domain, update_domain_cache, check_environment, ALLOWED_TEAMS,
+    get_user_credit_total, get_team_credit_total, get_team_members, get_team_info,
+    check_team_credit_limit
 )
 from local_error_logger import log_error
 
@@ -193,6 +195,11 @@ def main():
         st.write(f"**Team:** {st.session_state.user['team_name']}")
         st.write(f"**Basket:** {len(st.session_state.basket)} leads")
         
+        # Display user's credit usage
+        user_email = st.session_state.user['email']
+        total_credits = get_user_credit_total(user_email)
+        st.write(f"**Credits Used:** {total_credits}")
+        
         if st.button("Logout"):
             st.session_state.user = None
             st.session_state.api_keys = None
@@ -248,6 +255,14 @@ def main():
             elif check_blacklist(domain_query, blacklist):
                 st.error(f"🛑 Access Denied: '{domain_query}' is on the Global Blacklist.")
             else:
+                # Check team credit limit before allowing search
+                user_team = st.session_state.user['team_name']
+                is_allowed, remaining, current = check_team_credit_limit(user_team, credits_to_add=0)
+                
+                if not is_allowed:
+                    st.error("🚫 Credit Limit Reached: Your team has used all 4,500 credits. Please contact your PMs.")
+                    st.stop()
+                
                 # Clear old checkbox states and results
                 st.session_state.search_results = [] 
                 st.session_state.selected_ids = set()
@@ -321,13 +336,8 @@ def main():
             for person in current_page_results:
                 is_selected = person['id'] in st.session_state.selected_ids
                 
-                # Team De-duplication Check
-                sourced_by = is_lead_sourced_by_team(person['id'], st.session_state.user['team_name'])
-                
                 col_mark, col_details = st.columns([1, 10])
                 with col_mark:
-                    # Disable selection if already sourced? Or just warn?
-                    # Let's just warn for now to keep it flexible.
                     st.checkbox("", key=f"chk_{person['id']}")
                     
                     if st.session_state[f"chk_{person['id']}"]:
@@ -336,8 +346,7 @@ def main():
                         st.session_state.selected_ids.discard(person['id'])
                 
                 with col_details:
-                     badge = f" 🚩 **Already Sourced by {sourced_by}**" if sourced_by else ""
-                     st.markdown(f"**{person.get('first_name')} {person.get('last_name_obfuscated', '')}** — {person.get('title')}{badge}")
+                     st.markdown(f"**{person.get('first_name')} {person.get('last_name_obfuscated', '')}** — {person.get('title')}")
                      st.caption(f"{person.get('organization', {}).get('name', 'N/A')} | {person.get('email', 'Email Hidden')}")
 
             st.divider()
@@ -395,9 +404,22 @@ def main():
                 st.rerun()
                 
             if col_b2.button("✨ Enrich & Checkout", type="primary"):
+                # Check team credit limit before enrichment
+                user_email = st.session_state.user['email']
+                user_team = st.session_state.user['team_name']
+                credits_needed = len(st.session_state.basket)
+                
+                is_allowed, remaining, current = check_team_credit_limit(user_team, credits_to_add=credits_needed)
+                
+                if not is_allowed:
+                    if remaining is not None and remaining == 0:
+                        st.error("🚫 Credit Limit Reached: Your team has used all 4,500 credits. Please contact your PMs.")
+                    else:
+                        st.error(f"🚫 Credit Limit Exceeded: This enrichment would use {credits_needed} credits, but your team only has {remaining} credits remaining out of 4,500. Please reduce your basket size.")
+                    st.stop()
+                
                 with st.spinner("Enriching contacts (this uses credits)..."):
                     try:
-                        user_email = st.session_state.user['email']
                         results = enrich_people(st.session_state.basket)
                         
                         if not results:
@@ -464,16 +486,48 @@ def main():
             c3.metric("Emails Revealed", f"{total_enriched[0]['count']}")
             
             st.divider()
+            st.subheader("User Credit Usage")
+            users_with_credits = query('''
+                SELECT email, name, team_name, total_credits_used
+                FROM users
+                ORDER BY total_credits_used DESC
+            ''')
+            if users_with_credits:
+                df_users = pd.DataFrame(users_with_credits)
+                df_users.columns = ['Email', 'Name', 'Team', 'Credits Used']
+                st.dataframe(df_users, use_container_width=True)
+            else:
+                st.info("No user credit data available.")
+            
+            st.divider()
+            st.subheader("Team Credit Usage")
+            teams_with_credits = []
+            for team_name in ALLOWED_TEAMS:
+                team_info = get_team_info(team_name)
+                teams_with_credits.append({
+                    'Team': team_info['name'],
+                    'Total Credits': team_info['total_credits_used'],
+                    'Members': team_info['member_count']
+                })
+            
+            if teams_with_credits:
+                df_teams = pd.DataFrame(teams_with_credits)
+                df_teams = df_teams.sort_values('Total Credits', ascending=False)
+                st.dataframe(df_teams, use_container_width=True)
+            else:
+                st.info("No team credit data available.")
+            
+            st.divider()
             st.subheader("Leaderboard (Credit Usage)")
             usage_data = query('''
-                SELECT u.name, u.team_name, SUM(cl.credit_spent) as credits
-                FROM credit_logs cl
-                JOIN users u ON cl.user_email = u.email
-                GROUP BY u.email
-                ORDER BY credits DESC
+                SELECT u.name, u.team_name, u.total_credits_used as credits
+                FROM users u
+                ORDER BY u.total_credits_used DESC
             ''')
             if usage_data:
-                st.table(pd.DataFrame(usage_data))
+                df_leaderboard = pd.DataFrame(usage_data)
+                df_leaderboard.columns = ['Name', 'Team', 'Credits']
+                st.table(df_leaderboard)
             else:
                 st.info("No usage data recorded yet.")
             
@@ -501,15 +555,18 @@ def main():
                 with st.form("add_user_form"):
                     nu_email = st.text_input("Member Email")
                     nu_name = st.text_input("Full Name")
-                    nu_team = st.text_input("Team Name")
+                    nu_team = st.selectbox("Team", options=ALLOWED_TEAMS, index=None, placeholder="Select a team")
                     nu_admin = st.checkbox("Is Administrator?")
                     if st.form_submit_button("Save Member"):
-                        if nu_email and nu_name:
-                            add_user(nu_email, nu_name, nu_team, nu_admin)
-                            st.success(f"User {nu_name} updated in database!")
-                            st.rerun()
+                        if nu_email and nu_name and nu_team:
+                            try:
+                                add_user(nu_email, nu_name, nu_team, nu_admin)
+                                st.success(f"User {nu_name} updated in database!")
+                                st.rerun()
+                            except ValueError as e:
+                                st.error(str(e))
                         else:
-                            st.error("Email and Name are required.")
+                            st.error("Email, Name, and Team are required.")
             
             users = get_all_users()
             st.dataframe(pd.DataFrame(users), use_container_width=True)

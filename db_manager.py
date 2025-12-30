@@ -25,6 +25,13 @@ def convert_datetime_to_str(obj):
 DB_NAME = "sourcing.db"
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+# Allowed teams - only these teams are valid
+ALLOWED_TEAMS = ["BD", "Finance", "Marketing", "Strategy", "NPO", "Exec Board"]
+
+# Team credit limit (Exec Board team has no limit)
+TEAM_CREDIT_LIMIT = 4500
+EXEC_TEAM_NAME = "Exec Board"
+
 # --- DATABASE CONNECTION POOLING ---
 # We use ThreadedConnectionPool for multi-threaded Streamlit apps
 db_pool = None
@@ -174,6 +181,195 @@ def migrate_users_schema():
         sentry_sdk.capture_exception(e)
         print(f"⚠️  Migration warning: {e}")
 
+def migrate_team_requirement():
+    """Migrates users table to enforce team_name NOT NULL and add foreign key constraint."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Check if team_name is nullable
+        if DATABASE_URL:
+            cursor.execute("""
+                SELECT is_nullable 
+                FROM information_schema.columns 
+                WHERE table_name='users' AND column_name='team_name'
+            """)
+            result = cursor.fetchone()
+            is_nullable = result and result[0] == 'YES'
+        else:
+            # SQLite check
+            cursor.execute("PRAGMA table_info(users)")
+            columns = cursor.fetchall()
+            is_nullable = True
+            for col in columns:
+                if col[1] == 'team_name':
+                    is_nullable = col[3] == 0  # 0 means nullable in SQLite
+                    break
+        
+        if is_nullable:
+            # For PostgreSQL, we can alter the column
+            if DATABASE_URL:
+                # First, ensure all users have a team (should already be the case per user's statement)
+                # But defensive check: assign NULL teams to a default (shouldn't happen)
+                cursor.execute("SELECT COUNT(*) FROM users WHERE team_name IS NULL OR team_name = ''")
+                null_count = cursor.fetchone()[0]
+                if null_count > 0:
+                    print(f"⚠️  Found {null_count} users without teams. This shouldn't happen per requirements.")
+                    # We'll let the constraint fail if there are NULL teams
+                
+                # Add NOT NULL constraint
+                try:
+                    cursor.execute("ALTER TABLE users ALTER COLUMN team_name SET NOT NULL")
+                    conn.commit()
+                    print("✅ Added NOT NULL constraint to team_name")
+                except Exception as e:
+                    conn.rollback()
+                    print(f"⚠️  Could not add NOT NULL constraint: {e}")
+                    raise
+                
+                # Add foreign key constraint
+                try:
+                    cursor.execute("""
+                        ALTER TABLE users 
+                        ADD CONSTRAINT fk_users_team 
+                        FOREIGN KEY (team_name) REFERENCES teams(name)
+                    """)
+                    conn.commit()
+                    print("✅ Added foreign key constraint for team_name")
+                except Exception as e:
+                    # Constraint might already exist
+                    if "already exists" not in str(e).lower():
+                        conn.rollback()
+                        print(f"⚠️  Could not add foreign key constraint: {e}")
+            else:
+                # SQLite: Need to recreate table
+                print("🔄 Migrating users table for SQLite (adding NOT NULL and foreign key)...")
+                
+                # Create new table with constraints
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS users_new (
+                        email TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        team_name TEXT NOT NULL,
+                        password_hash TEXT,
+                        is_admin INTEGER DEFAULT 0,
+                        FOREIGN KEY (team_name) REFERENCES teams(name)
+                    )
+                """)
+                
+                # Copy data
+                cursor.execute("""
+                    INSERT INTO users_new (email, name, team_name, password_hash, is_admin)
+                    SELECT email, name, team_name, password_hash, is_admin
+                    FROM users
+                    WHERE team_name IS NOT NULL AND team_name != ''
+                """)
+                
+                # Drop old table and rename
+                cursor.execute("DROP TABLE users")
+                cursor.execute("ALTER TABLE users_new RENAME TO users")
+                conn.commit()
+                print("✅ Migrated users table with NOT NULL and foreign key constraints")
+        
+        release_db_connection(conn)
+    except Exception as e:
+        sentry_sdk.capture_exception(e)
+        print(f"⚠️  Migration warning: {e}")
+
+def migrate_user_credits_column():
+    """Migrates users table to add total_credits_used column if it doesn't exist."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Check if total_credits_used column exists
+        if DATABASE_URL:
+            cursor.execute("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='users' AND column_name='total_credits_used'
+            """)
+            has_column = cursor.fetchone() is not None
+        else:
+            # SQLite check
+            cursor.execute("PRAGMA table_info(users)")
+            columns = [row[1] for row in cursor.fetchall()]
+            has_column = 'total_credits_used' in columns
+        
+        if not has_column:
+            # Add total_credits_used column
+            if DATABASE_URL:
+                cursor.execute("ALTER TABLE users ADD COLUMN total_credits_used INTEGER DEFAULT 0")
+            else:
+                # SQLite: Add column with default value
+                cursor.execute("ALTER TABLE users ADD COLUMN total_credits_used INTEGER DEFAULT 0")
+            conn.commit()
+            print("✅ Added total_credits_used column to users table")
+            
+            # Calculate initial totals for existing users
+            cursor.execute("""
+                UPDATE users 
+                SET total_credits_used = (
+                    SELECT COALESCE(SUM(credit_spent), 0) 
+                    FROM credit_logs 
+                    WHERE credit_logs.user_email = users.email
+                )
+            """)
+            conn.commit()
+            print("✅ Calculated initial credit totals for existing users")
+        
+        release_db_connection(conn)
+    except Exception as e:
+        sentry_sdk.capture_exception(e)
+        print(f"⚠️  Migration warning: {e}")
+
+def migrate_team_credits_column():
+    """Migrates teams table to add total_credits_used column if it doesn't exist."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Check if total_credits_used column exists
+        if DATABASE_URL:
+            cursor.execute("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='teams' AND column_name='total_credits_used'
+            """)
+            has_column = cursor.fetchone() is not None
+        else:
+            # SQLite check
+            cursor.execute("PRAGMA table_info(teams)")
+            columns = [row[1] for row in cursor.fetchall()]
+            has_column = 'total_credits_used' in columns
+        
+        if not has_column:
+            # Add total_credits_used column
+            if DATABASE_URL:
+                cursor.execute("ALTER TABLE teams ADD COLUMN total_credits_used INTEGER DEFAULT 0")
+            else:
+                # SQLite: Add column with default value
+                cursor.execute("ALTER TABLE teams ADD COLUMN total_credits_used INTEGER DEFAULT 0")
+            conn.commit()
+            print("✅ Added total_credits_used column to teams table")
+            
+            # Calculate initial team totals by summing all team members' total_credits_used
+            cursor.execute("""
+                UPDATE teams 
+                SET total_credits_used = (
+                    SELECT COALESCE(SUM(total_credits_used), 0) 
+                    FROM users 
+                    WHERE users.team_name = teams.name
+                )
+            """)
+            conn.commit()
+            print("✅ Calculated initial team credit totals from member totals")
+        
+        release_db_connection(conn)
+    except Exception as e:
+        sentry_sdk.capture_exception(e)
+        print(f"⚠️  Migration warning: {e}")
+
 def init_db():
     """Initializes the database schema with Postgres-safe syntax."""
     conn = get_db_connection()
@@ -181,21 +377,40 @@ def init_db():
     
     # 1. Teams
     if DATABASE_URL:
-        cursor.execute("CREATE TABLE IF NOT EXISTS teams (name TEXT PRIMARY KEY)")
+        cursor.execute("CREATE TABLE IF NOT EXISTS teams (name TEXT PRIMARY KEY, total_credits_used INTEGER DEFAULT 0)")
     else:
-        cursor.execute("CREATE TABLE IF NOT EXISTS teams (name TEXT PRIMARY KEY)")
+        cursor.execute("CREATE TABLE IF NOT EXISTS teams (name TEXT PRIMARY KEY, total_credits_used INTEGER DEFAULT 0)")
     
-    # 2. Users (Fix Boolean Default)
+    # Ensure all allowed teams exist
+    for team in ALLOWED_TEAMS:
+        cursor.execute("INSERT INTO teams (name) VALUES (?) ON CONFLICT DO NOTHING", (team,))
+    
+    # 2. Users (Fix Boolean Default) - team_name is NOT NULL with foreign key
     bool_default = "FALSE" if DATABASE_URL else "0"
-    cursor.execute(f'''
-        CREATE TABLE IF NOT EXISTS users (
-            email TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            team_name TEXT,
-            password_hash TEXT,
-            is_admin BOOLEAN DEFAULT {bool_default}
-        )
-    ''')
+    if DATABASE_URL:
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS users (
+                email TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                team_name TEXT NOT NULL,
+                password_hash TEXT,
+                is_admin BOOLEAN DEFAULT {bool_default},
+                total_credits_used INTEGER DEFAULT 0,
+                FOREIGN KEY (team_name) REFERENCES teams(name)
+            )
+        ''')
+    else:
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS users (
+                email TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                team_name TEXT NOT NULL,
+                password_hash TEXT,
+                is_admin INTEGER DEFAULT {bool_default},
+                total_credits_used INTEGER DEFAULT 0,
+                FOREIGN KEY (team_name) REFERENCES teams(name)
+            )
+        ''')
     
     # 3. User Keys
     cursor.execute('''
@@ -318,6 +533,9 @@ def init_db():
     # Run migrations for schema updates
     migrate_users_schema()  # Add is_admin column if missing
     migrate_user_keys_schema()  # Migrate user_keys to single-key schema
+    migrate_team_requirement()  # Enforce team_name NOT NULL and foreign key
+    migrate_user_credits_column()  # Add total_credits_used column and calculate initial totals
+    migrate_team_credits_column()  # Add total_credits_used column to teams and calculate initial totals
 
 def log_audit_event(email, event_type, details=None):
     """Logs a security or business event to the audit_logs table and Sentry."""
@@ -344,6 +562,19 @@ def get_user(email):
     return res[0] if res else None
 def add_user(email, name, team_name, is_admin=False):
     """Adds or updates a user in the database roster."""
+    # Validate team_name
+    if not team_name or not team_name.strip():
+        raise ValueError("team_name is required and cannot be empty")
+    
+    team_name = team_name.strip()
+    
+    # Validate team_name is in allowed teams list
+    if team_name not in ALLOWED_TEAMS:
+        raise ValueError(f"team_name must be one of: {', '.join(ALLOWED_TEAMS)}. Got: '{team_name}'")
+    
+    # Ensure team exists in teams table (defensive check)
+    query("INSERT INTO teams (name) VALUES (?) ON CONFLICT DO NOTHING", (team_name,))
+    
     query('''
         INSERT INTO users (email, name, team_name, is_admin)
         VALUES (?, ?, ?, ?)
@@ -475,11 +706,18 @@ def query(q, params=()):
 
 def sync_roster(roster_data):
     for entry in roster_data:
-        query("INSERT INTO teams (name) VALUES (?) ON CONFLICT DO NOTHING", (entry['team_name'],))
-        query('''
-            INSERT INTO users (email, name, team_name) VALUES (?, ?, ?)
-            ON CONFLICT(email) DO UPDATE SET name=EXCLUDED.name, team_name=EXCLUDED.team_name
-        ''', (entry['email'], entry['name'], entry['team_name']))
+        team_name = entry.get('team_name', '').strip()
+        
+        # Validate team_name is in allowed teams
+        if not team_name or team_name not in ALLOWED_TEAMS:
+            raise ValueError(f"Invalid team_name '{team_name}' for user {entry.get('email')}. Must be one of: {', '.join(ALLOWED_TEAMS)}")
+        
+        # Ensure team exists in teams table
+        query("INSERT INTO teams (name) VALUES (?) ON CONFLICT DO NOTHING", (team_name,))
+        
+        # Use add_user for validation and proper handling
+        is_admin = entry.get('is_admin', False)
+        add_user(entry['email'], entry['name'], team_name, is_admin=is_admin)
 
 def get_basket_leads(user_email):
     rows = query("SELECT id FROM baskets WHERE user_email = ?", (user_email,))
@@ -540,13 +778,84 @@ def update_lead_enrichment(apollo_id, enriched_data):
     ''', (serializable_data.get('email'), serializable_data.get('first_name'), serializable_data.get('last_name'), is_enriched_val, json.dumps(serializable_data), apollo_id))
 
 def log_credit_usage(user_email, action, credits):
+    """Logs credit usage event and updates user's and team's total credits atomically."""
+    # Insert individual credit event
     query("INSERT INTO credit_logs (user_email, action, credit_spent) VALUES (?, ?, ?)", (user_email, action, credits))
+    
+    # Get user's team_name
+    user = get_user(user_email)
+    if not user:
+        raise ValueError(f"User {user_email} not found")
+    
+    team_name = user.get('team_name')
+    if not team_name:
+        raise ValueError(f"User {user_email} has no team_name")
+    
+    # Atomically update user's total credits
+    query("UPDATE users SET total_credits_used = total_credits_used + ? WHERE email = ?", (credits, user_email))
+    
+    # Atomically update team's total credits
+    query("UPDATE teams SET total_credits_used = total_credits_used + ? WHERE name = ?", (credits, team_name))
 
-def is_lead_sourced_by_team(apollo_id, team_name):
-    rows = query('''
-        SELECT u.name FROM basket_leads bl
-        JOIN baskets b ON bl.basket_id = b.id
-        JOIN users u ON b.user_email = u.email
-        WHERE bl.lead_id = ? AND u.team_name = ?
-    ''', (apollo_id, team_name))
-    return rows[0]['name'] if rows else None
+def get_user_credit_total(user_email):
+    """Retrieves the pre-calculated total credits used by a user."""
+    res = query("SELECT total_credits_used FROM users WHERE email = ?", (user_email,))
+    if res and len(res) > 0:
+        return res[0].get('total_credits_used', 0) or 0
+    return 0
+
+def get_team_credit_total(team_name):
+    """Retrieves the pre-calculated total credits used by a team."""
+    res = query("SELECT total_credits_used FROM teams WHERE name = ?", (team_name,))
+    if res and len(res) > 0:
+        return res[0].get('total_credits_used', 0) or 0
+    return 0
+
+def get_team_members(team_name):
+    """Retrieves list of all users belonging to a team."""
+    return query("SELECT email, name, team_name, is_admin, total_credits_used FROM users WHERE team_name = ? ORDER BY name", (team_name,))
+
+def get_team_info(team_name):
+    """Returns team info including members and credits."""
+    team_credits = get_team_credit_total(team_name)
+    members = get_team_members(team_name)
+    return {
+        'name': team_name,
+        'total_credits_used': team_credits,
+        'members': members,
+        'member_count': len(members) if members else 0
+    }
+
+def check_team_credit_limit(team_name, credits_to_add=0):
+    """
+    Checks if a team can perform an operation that would add credits.
+    
+    Args:
+        team_name: Name of the team
+        credits_to_add: Number of credits that would be added (default: 0, just checking current status)
+    
+    Returns:
+        tuple: (is_allowed: bool, remaining_credits: int, current_credits: int)
+    """
+    # Exec Board team has no limit
+    if team_name == EXEC_TEAM_NAME:
+        return (True, None, get_team_credit_total(team_name))
+    
+    # Get current team credits
+    current_credits = get_team_credit_total(team_name)
+    
+    # Calculate total after adding credits
+    total_after = current_credits + credits_to_add
+    
+    # Check if it would exceed limit
+    if total_after > TEAM_CREDIT_LIMIT:
+        remaining = max(0, TEAM_CREDIT_LIMIT - current_credits)
+        return (False, remaining, current_credits)
+    
+    # Check if already at or over limit (for search blocking)
+    if current_credits >= TEAM_CREDIT_LIMIT:
+        return (False, 0, current_credits)
+    
+    # Within limit
+    remaining = TEAM_CREDIT_LIMIT - total_after
+    return (True, remaining, current_credits)
