@@ -14,7 +14,8 @@ from db_manager import (
     get_blacklist, add_to_blacklist, remove_from_blacklist,
     get_cached_domain, update_domain_cache, check_environment, ALLOWED_TEAMS,
     get_user_credit_total, get_team_credit_total, get_team_members, get_team_info,
-    check_team_credit_limit
+    check_team_credit_limit, create_user_session, get_user_from_session, 
+    delete_user_session, cleanup_expired_sessions
 )
 import db_manager
 from local_error_logger import log_error
@@ -61,6 +62,36 @@ st.markdown("""
         border-radius: 8px;
     }
     </style>
+    
+    <script>
+    // Cookie management functions
+    function setCookie(name, value, days) {
+        var expires = "";
+        if (days) {
+            var date = new Date();
+            date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+            expires = "; expires=" + date.toUTCString();
+        }
+        // Set secure cookie (requires HTTPS in production)
+        var secure = window.location.protocol === 'https:' ? '; Secure' : '';
+        document.cookie = name + "=" + (value || "") + expires + "; path=/" + secure + "; SameSite=Lax";
+    }
+    
+    function getCookie(name) {
+        var nameEQ = name + "=";
+        var ca = document.cookie.split(';');
+        for(var i = 0; i < ca.length; i++) {
+            var c = ca[i];
+            while (c.charAt(0) === ' ') c = c.substring(1, c.length);
+            if (c.indexOf(nameEQ) === 0) return c.substring(nameEQ.length, c.length);
+        }
+        return null;
+    }
+    
+    function deleteCookie(name) {
+        document.cookie = name + "=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+    }
+    </script>
 """, unsafe_allow_html=True)
 
 # --- STARTUP CHECK ---
@@ -97,11 +128,100 @@ def main():
     # 1. INITIALIZE DB
     init_db()
     
+    # Cleanup expired sessions (only run occasionally, not every load)
+    # Use a flag to only run cleanup every N page loads
+    if "last_cleanup" not in st.session_state:
+        st.session_state.last_cleanup = 0
+    import time
+    if time.time() - st.session_state.last_cleanup > 3600:  # Run cleanup max once per hour
+        cleanup_expired_sessions()
+        st.session_state.last_cleanup = time.time()
+    
     # Fetch active profiles and settings from DB
     # (Note: For local-to-cloud migration, use the cloud_sync.py utility)
     blacklist = get_blacklist()
 
-    # 2. LOGIN SCREEN
+    # 2. CHECK FOR EXISTING SESSION (persistent login)
+    if not st.session_state.user:
+        session_token = None
+        
+        # Method 1: Check URL params first (fastest method)
+        query_params = st.query_params
+        session_token = query_params.get("session", None)
+        
+        # Method 2: Try middleware API with SHORTER timeout (only if no token in URL)
+        # This avoids waiting if we already have a token
+        if not session_token:
+            try:
+                import requests
+                middleware_url = os.getenv("SESSION_MIDDLEWARE_URL", "http://127.0.0.1:8502")
+                # Quick check with very short timeout (0.1s instead of 1s)
+                response = requests.get(f"{middleware_url}/api/session/validate", timeout=0.1)
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get('valid') and data.get('user'):
+                        user_data = data['user']
+                        user = get_user(user_data['email'])
+                        if user:
+                            st.session_state.user = user
+                            st.session_state.basket = get_basket_leads(user['email'])
+                            saved_key = get_user_keys(user['email'])
+                            if saved_key:
+                                st.session_state.api_keys = saved_key
+                            st.rerun()
+            except:
+                # Middleware not available - skip it quickly
+                pass
+        
+        # Method 3: Read from JavaScript-accessible cookie (only if no token yet)
+        # Only try once per page load to avoid reload loops
+        if not session_token:
+            # Check if URL already has session param to avoid reload loop
+            if "session" not in query_params:
+                cookie_read_script = """
+                <script>
+                (function() {
+                    function getCookie(name) {
+                        var nameEQ = name + "=";
+                        var ca = document.cookie.split(';');
+                        for(var i = 0; i < ca.length; i++) {
+                            var c = ca[i];
+                            while (c.charAt(0) === ' ') c = c.substring(1, c.length);
+                            if (c.indexOf(nameEQ) === 0) {
+                                return c.substring(nameEQ.length, c.length);
+                            }
+                        }
+                        return null;
+                    }
+                    var token = getCookie("session_token");
+                    if (token && !window.location.search.includes("session=")) {
+                        var url = new URL(window.location);
+                        url.searchParams.set("session", token);
+                        window.history.replaceState({}, '', url);
+                        // Small delay to avoid immediate reload
+                        setTimeout(function() {
+                            window.location.reload();
+                        }, 100);
+                    }
+                })();
+                </script>
+                """
+                st.markdown(cookie_read_script, unsafe_allow_html=True)
+                # Re-check query params after potential cookie read
+                query_params = st.query_params
+                session_token = query_params.get("session", None)
+        
+        if session_token:
+            user = get_user_from_session(session_token)
+            if user:
+                st.session_state.user = user
+                st.session_state.basket = get_basket_leads(user['email'])
+                saved_key = get_user_keys(user['email'])
+                if saved_key:
+                    st.session_state.api_keys = saved_key
+                st.rerun()
+
+    # 3. LOGIN SCREEN
     if not st.session_state.user:
         st.header("Login")
         st.write("Welcome back! Please enter your email to continue.")
@@ -128,6 +248,50 @@ def main():
                             log_audit_event(login_email, "LOGIN_SUCCESS")
                             # Persistence: Load basket from DB on login
                             st.session_state.basket = get_basket_leads(user_obj['email'])
+                            
+                            # Create session token for persistent login
+                            session_token = create_user_session(login_email)
+                            
+                            # Method 1: Try to set HTTP-only cookie via session middleware API
+                            # (Preferred method - requires session_middleware.py running)
+                            try:
+                                import requests
+                                middleware_url = os.getenv("SESSION_MIDDLEWARE_URL", "http://127.0.0.1:8502")
+                                response = requests.post(
+                                    f"{middleware_url}/api/session/create",
+                                    json={"email": login_email},
+                                    timeout=2
+                                )
+                                if response.status_code == 200:
+                                    # Cookie set by middleware, redirect will include it
+                                    st.rerun()
+                                    return
+                            except:
+                                # Middleware not available, use JavaScript cookie fallback
+                                pass
+                            
+                            # Method 2: Set JavaScript-accessible cookie (fallback)
+                            # Note: Less secure but works without middleware
+                            cookie_script = f"""
+                            <script>
+                            function setCookie(name, value, days) {{
+                                var expires = "";
+                                if (days) {{
+                                    var date = new Date();
+                                    date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+                                    expires = "; expires=" + date.toUTCString();
+                                }}
+                                var secure = window.location.protocol === 'https:' ? '; Secure' : '';
+                                document.cookie = name + "=" + (value || "") + expires + "; path=/" + secure + "; SameSite=Lax";
+                            }}
+                            setCookie("session_token", "{session_token}", 1);
+                            </script>
+                            """
+                            st.markdown(cookie_script, unsafe_allow_html=True)
+                            
+                            # Also add to URL as fallback (will be removed once cookie is read)
+                            st.query_params["session"] = session_token
+                            
                             st.rerun()
                         else:
                             # User not found in database
@@ -166,10 +330,35 @@ def main():
         
         # Logout button
         if st.button("Logout", type="secondary"):
+            # Get session token from cookie or URL
+            session_token = None
+            query_params = st.query_params
+            session_token = query_params.get("session", None)
+            
+            # Also try to get from cookie via JavaScript
+            cookie_delete_script = """
+            <script>
+            function deleteCookie(name) {
+                document.cookie = name + "=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+            }
+            deleteCookie("session_token");
+            </script>
+            """
+            st.markdown(cookie_delete_script, unsafe_allow_html=True)
+            
+            if session_token:
+                delete_user_session(session_token)
+            
+            # Clear session state
             st.session_state.user = None
             st.session_state.api_keys = None
             st.session_state.basket = []
             st.session_state.search_results = []
+            
+            # Remove session token from URL if present
+            if "session" in st.query_params:
+                del st.query_params["session"]
+            
             st.rerun()
         
         with st.form("keys_form"):
@@ -203,10 +392,35 @@ def main():
         st.write(f"**Credits Used:** {total_credits}")
         
         if st.button("Logout"):
+            # Get session token from cookie or URL
+            session_token = None
+            query_params = st.query_params
+            session_token = query_params.get("session", None)
+            
+            # Also delete cookie via JavaScript
+            cookie_delete_script = """
+            <script>
+            function deleteCookie(name) {
+                document.cookie = name + "=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+            }
+            deleteCookie("session_token");
+            </script>
+            """
+            st.markdown(cookie_delete_script, unsafe_allow_html=True)
+            
+            if session_token:
+                delete_user_session(session_token)
+            
+            # Clear session state
             st.session_state.user = None
             st.session_state.api_keys = None
             st.session_state.basket = []
             st.session_state.search_results = []
+            
+            # Remove session token from URL if present
+            if "session" in st.query_params:
+                del st.query_params["session"]
+            
             st.rerun()
             
         st.divider()
@@ -336,13 +550,18 @@ def main():
                 st.rerun()
 
             for person in current_page_results:
+                checkbox_key = f"chk_{person['id']}"
                 is_selected = person['id'] in st.session_state.selected_ids
+                
+                # Initialize checkbox state if not exists
+                if checkbox_key not in st.session_state:
+                    st.session_state[checkbox_key] = is_selected
                 
                 col_mark, col_details = st.columns([1, 10])
                 with col_mark:
-                    st.checkbox("", key=f"chk_{person['id']}")
+                    checkbox_value = st.checkbox("Select", key=checkbox_key, label_visibility="hidden")
                     
-                    if st.session_state[f"chk_{person['id']}"]:
+                    if checkbox_value:
                         st.session_state.selected_ids.add(person['id'])
                     else:
                         st.session_state.selected_ids.discard(person['id'])
@@ -396,7 +615,7 @@ def main():
             display_cols = ['first_name', 'last_name', 'title', 'company']
             # Only keep columns that actually exist
             available_display = [c for c in display_cols if c in df.columns]
-            st.dataframe(df[available_display], use_container_width=True)
+            st.dataframe(df[available_display], width='stretch')
 
             col_b1, col_b2 = st.columns([1, 4])
             if col_b1.button("Clear Basket"):
@@ -509,7 +728,7 @@ def main():
             if users_with_credits:
                 df_users = pd.DataFrame(users_with_credits)
                 df_users.columns = ['Email', 'Name', 'Team', 'Credits Used']
-                st.dataframe(df_users, use_container_width=True)
+                st.dataframe(df_users, width='stretch')
             else:
                 st.info("No user credit data available.")
             
@@ -527,7 +746,7 @@ def main():
             if teams_with_credits:
                 df_teams = pd.DataFrame(teams_with_credits)
                 df_teams = df_teams.sort_values('Total Credits', ascending=False)
-                st.dataframe(df_teams, use_container_width=True)
+                st.dataframe(df_teams, width='stretch')
             else:
                 st.info("No team credit data available.")
             
@@ -583,13 +802,13 @@ def main():
                             st.error("Email, Name, and Team are required.")
             
             users = get_all_users()
-            st.dataframe(pd.DataFrame(users), use_container_width=True)
+            st.dataframe(pd.DataFrame(users), width='stretch')
 
             st.divider()
             st.subheader("Security Feed (Audit Logs)")
             audit_data = query("SELECT timestamp, user_email, event_type, details FROM audit_logs ORDER BY timestamp DESC LIMIT 20")
             if audit_data:
-                st.dataframe(pd.DataFrame(audit_data), use_container_width=True)
+                st.dataframe(pd.DataFrame(audit_data), width='stretch')
             else:
                 st.info("No security events recorded.")
             

@@ -522,6 +522,28 @@ def init_db():
         )
     ''')
 
+    # 11. User Sessions (for persistent login)
+    if DATABASE_URL:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_sessions (
+                session_token TEXT PRIMARY KEY,
+                user_email TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP,
+                FOREIGN KEY (user_email) REFERENCES users (email) ON DELETE CASCADE
+            )
+        ''')
+    else:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_sessions (
+                session_token TEXT PRIMARY KEY,
+                user_email TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP,
+                FOREIGN KEY (user_email) REFERENCES users (email)
+            )
+        ''')
+
     if DATABASE_URL:
         try:
             conn.commit()
@@ -897,6 +919,84 @@ def get_team_info(team_name):
         'members': members,
         'member_count': len(members) if members else 0
     }
+
+def create_user_session(user_email, expires_in_hours=24):
+    """
+    Creates a new session for a user.
+    
+    Args:
+        user_email: User's email address
+        expires_in_hours: Hours until session expires (default: 24)
+        
+    Returns:
+        str: Session token
+    """
+    import secrets
+    from datetime import timedelta
+    
+    # Generate secure random token
+    session_token = secrets.token_urlsafe(32)
+    
+    # Calculate expiration time
+    if DATABASE_URL:
+        expires_at = datetime.now() + timedelta(hours=expires_in_hours)
+    else:
+        expires_at = datetime.now() + timedelta(hours=expires_in_hours)
+    
+    # Store session in database
+    query('''
+        INSERT INTO user_sessions (session_token, user_email, expires_at)
+        VALUES (?, ?, ?)
+    ''', (session_token, user_email, expires_at))
+    
+    return session_token
+
+
+def get_user_from_session(session_token):
+    """
+    Retrieves user information from a session token.
+    
+    Args:
+        session_token: Session token from URL query parameter
+        
+    Returns:
+        dict: User object if session is valid, None otherwise
+    """
+    if not session_token:
+        return None
+    
+    # Check if session exists and is not expired
+    rows = query('''
+        SELECT user_email, expires_at 
+        FROM user_sessions 
+        WHERE session_token = ? AND (expires_at IS NULL OR expires_at > ?)
+    ''', (session_token, datetime.now()))
+    
+    if not rows:
+        return None
+    
+    user_email = rows[0]['user_email']
+    user = get_user(user_email)
+    return user
+
+
+def delete_user_session(session_token):
+    """
+    Deletes a user session (logout).
+    
+    Args:
+        session_token: Session token to delete
+    """
+    if session_token:
+        query("DELETE FROM user_sessions WHERE session_token = ?", (session_token,))
+
+
+def cleanup_expired_sessions():
+    """
+    Removes expired sessions from the database.
+    """
+    query("DELETE FROM user_sessions WHERE expires_at IS NOT NULL AND expires_at < ?", (datetime.now(),))
+
 
 def check_team_credit_limit(team_name, credits_to_add=0):
     """

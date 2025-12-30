@@ -7,3 +7,5 @@ cryptography
 sentry-sdk
 gspread
 google-auth
+flask
+flask-cors
