@@ -16,6 +16,7 @@ from db_manager import (
     get_user_credit_total, get_team_credit_total, get_team_members, get_team_info,
     check_team_credit_limit
 )
+import db_manager
 from local_error_logger import log_error
 
 # --- SENTRY INITIALIZATION ---
@@ -478,8 +479,9 @@ def main():
             # Total Leads in DB
             total_leads = query("SELECT COUNT(*) as count FROM leads")
             
-            # Total Enriched
-            total_enriched = query("SELECT COUNT(*) as count FROM leads WHERE is_enriched = 1")
+            # Total Enriched (use TRUE for PostgreSQL, 1 for SQLite)
+            enriched_condition = "TRUE" if db_manager.DATABASE_URL else "1"
+            total_enriched = query(f"SELECT COUNT(*) as count FROM leads WHERE is_enriched = {enriched_condition}")
             
             c1.metric("Credits Consumed", f"{total_credits}")
             c2.metric("Leads Stored", f"{total_leads[0]['count']}")
