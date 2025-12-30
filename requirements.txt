@@ -5,3 +5,5 @@ python-dotenv
 psycopg2-binary
 cryptography
 sentry-sdk
+gspread
+google-auth

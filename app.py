@@ -18,6 +18,7 @@ from db_manager import (
 )
 import db_manager
 from local_error_logger import log_error
+from export_manager import export_to_clipboard
 
 # --- SENTRY INITIALIZATION ---
 SENTRY_DSN = os.getenv("SENTRY_DSN")
@@ -446,23 +447,34 @@ def main():
                         sentry_sdk.capture_exception(e)
 
             if st.session_state.get('enriched', False):
-                # CSV output: first name, last name, company, title and email
+                st.divider()
+                st.subheader("Export Enriched Contacts")
+                
+                # Keep existing CSV download button
                 csv_cols = ['first_name', 'last_name', 'company', 'title', 'email']
-                # Create a fresh DF for export to ensure column order and presence
                 export_df = pd.DataFrame(st.session_state.basket)
-                # Ensure company and last name are prepared
                 if 'organization' in export_df.columns:
                     export_df['company'] = export_df['organization'].apply(lambda x: x.get('name') if isinstance(x, dict) else str(x))
                 
                 available_csv = [c for c in csv_cols if c in export_df.columns]
                 csv_data = export_df[available_csv].to_csv(index=False).encode('utf-8')
                 
-                st.download_button(
-                    label="Download Enriched CSV", 
-                    data=csv_data, 
-                    file_name="apollo_enriched_leads.csv", 
-                    mime="text/csv"
-                )
+                col_download, col_clipboard = st.columns(2)
+                
+                with col_download:
+                    st.download_button(
+                        label="📥 Download CSV", 
+                        data=csv_data, 
+                        file_name="apollo_enriched_leads.csv", 
+                        mime="text/csv"
+                    )
+                
+                with col_clipboard:
+                    # Copy to clipboard functionality (tab-separated, no headers)
+                    tsv_string = export_to_clipboard(st.session_state.basket)
+                    if tsv_string:
+                        st.code(tsv_string, language=None)
+                        st.caption("Copy the data above and paste into Google Sheets (tab-separated, no headers)")
 
     # --- ADMIN TAB ---
     if is_admin:

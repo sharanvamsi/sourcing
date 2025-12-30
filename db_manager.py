@@ -768,16 +768,86 @@ def clear_basket(user_email):
     rows = query("SELECT id FROM baskets WHERE user_email = ?", (user_email,))
     if rows: query("DELETE FROM basket_leads WHERE basket_id = ?", (rows[0]['id'],))
 
-def update_lead_enrichment(apollo_id, enriched_data):
+def get_lead_by_id(apollo_id):
+    """Retrieves a lead by apollo_id. Returns None if not found."""
     if not apollo_id:
-        raise ValueError("apollo_id is required for update_lead_enrichment")
-    is_enriched_val = True if DATABASE_URL else 1
+        return None
+    rows = query("SELECT * FROM leads WHERE apollo_id = ?", (apollo_id,))
+    if not rows:
+        return None
+    lead = dict(rows[0])
+    # Convert datetime objects to strings
+    lead = convert_datetime_to_str(lead)
+    # Parse apollo_data if it exists
+    if lead.get('apollo_data'):
+        try:
+            apollo_data = json.loads(lead['apollo_data'])
+            # Merge apollo_data into lead dict
+            lead.update(apollo_data)
+        except (json.JSONDecodeError, TypeError) as e:
+            sentry_sdk.capture_exception(e)
+            print(f"Warning: Failed to parse apollo_data for lead {apollo_id}: {e}")
+    return lead
+
+def is_lead_enriched(apollo_id):
+    """Checks if a lead exists in the database and is already enriched."""
+    if not apollo_id:
+        return False
+    rows = query("SELECT is_enriched FROM leads WHERE apollo_id = ?", (apollo_id,))
+    if not rows:
+        return False
+    # Check if enriched (handle both boolean and integer)
+    is_enriched = rows[0].get('is_enriched')
+    return bool(is_enriched) if is_enriched is not None else False
+
+def store_enriched_lead(apollo_id, enriched_data):
+    """
+    Stores or updates a lead with complete enrichment data.
+    Stores ALL enrichment API response data in apollo_data JSON field.
+    """
+    if not apollo_id:
+        raise ValueError("apollo_id is required for store_enriched_lead")
+    
     # Convert datetime objects to strings before JSON serialization
     serializable_data = convert_datetime_to_str(enriched_data)
+    
+    # Extract key fields for direct columns
+    email = serializable_data.get('email')
+    first_name = serializable_data.get('first_name')
+    last_name = serializable_data.get('last_name')
+    title = serializable_data.get('title')
+    organization_name = None
+    if serializable_data.get('organization'):
+        organization_name = serializable_data.get('organization', {}).get('name')
+    
+    is_enriched_val = True if DATABASE_URL else 1
+    
+    # Store complete enrichment data in apollo_data JSON field
     query('''
-        UPDATE leads SET email = ?, first_name = ?, last_name = ?, is_enriched = ?, apollo_data = ?
-        WHERE apollo_id = ?
-    ''', (serializable_data.get('email'), serializable_data.get('first_name'), serializable_data.get('last_name'), is_enriched_val, json.dumps(serializable_data), apollo_id))
+        INSERT INTO leads (apollo_id, first_name, last_name, title, organization_name, email, is_enriched, apollo_data)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(apollo_id) DO UPDATE SET 
+            email = EXCLUDED.email,
+            first_name = EXCLUDED.first_name,
+            last_name = EXCLUDED.last_name,
+            title = EXCLUDED.title,
+            organization_name = EXCLUDED.organization_name,
+            is_enriched = EXCLUDED.is_enriched,
+            apollo_data = EXCLUDED.apollo_data
+    ''', (
+        apollo_id,
+        first_name,
+        last_name,
+        title,
+        organization_name,
+        email,
+        is_enriched_val,
+        json.dumps(serializable_data, default=str)
+    ))
+
+def update_lead_enrichment(apollo_id, enriched_data):
+    """Updates an existing lead with enrichment data. Uses store_enriched_lead for consistency."""
+    store_enriched_lead(apollo_id, enriched_data)
 
 def log_credit_usage(user_email, action, credits):
     """Logs credit usage event and updates user's and team's total credits atomically."""

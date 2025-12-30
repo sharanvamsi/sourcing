@@ -6,6 +6,7 @@ import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 from experiment_search import search_people
+from db_manager import get_lead_by_id, is_lead_enriched, store_enriched_lead
 
 load_dotenv()
 
@@ -52,6 +53,7 @@ def _enrich_batch(batch, api_key, batch_index):
 def enrich_people(people_list, max_workers=5):
     """
     Enriches a list of people using Apollo's bulk_match endpoint.
+    Checks database first to avoid redundant API calls for already-enriched contacts.
     Batches in groups of 10 and processes batches in parallel.
     
     Args:
@@ -71,46 +73,102 @@ def enrich_people(people_list, max_workers=5):
     if not people_list:
         return []
 
-    batch_size = 10
-    batches = []
+    # Step 1: Check database for already-enriched contacts
+    already_enriched = []
+    needs_enrichment = []
+    enrichment_map = {}  # Maps original index to enriched data from DB
     
-    # Create batches
-    for i in range(0, len(people_list), batch_size):
-        batch = people_list[i:i + batch_size]
-        batches.append((i // batch_size, batch))
-    
-    enriched_results = []
-    errors = []
-    
-    # Process batches in parallel
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit all batch processing tasks
-        future_to_batch = {
-            executor.submit(_enrich_batch, batch, api_key, batch_index): batch_index 
-            for batch_index, batch in batches
-        }
+    for idx, person in enumerate(people_list):
+        apollo_id = person.get('id')
+        if not apollo_id:
+            # If no ID, we need to enrich via API
+            needs_enrichment.append((idx, person))
+            continue
         
-        # Collect results as they complete
-        batch_results = {}
-        for future in as_completed(future_to_batch):
-            batch_index, results, error = future.result()
-            batch_results[batch_index] = (results, error)
+        # Check if already enriched in database
+        if is_lead_enriched(apollo_id):
+            # Get enriched data from database
+            enriched_lead = get_lead_by_id(apollo_id)
+            if enriched_lead and enriched_lead.get('email'):
+                # Store mapping to maintain order
+                enrichment_map[idx] = enriched_lead
+                already_enriched.append(idx)
+        else:
+            # Needs enrichment via API
+            needs_enrichment.append((idx, person))
+    
+    # Step 2: Enrich contacts that need API calls
+    api_enriched_results = []
+    if needs_enrichment:
+        # Extract just the person objects for API calls
+        people_to_enrich = [person for _, person in needs_enrichment]
+        
+        batch_size = 10
+        batches = []
+        
+        # Create batches
+        for i in range(0, len(people_to_enrich), batch_size):
+            batch = people_to_enrich[i:i + batch_size]
+            batches.append((i // batch_size, batch))
+        
+        errors = []
+        
+        # Process batches in parallel
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all batch processing tasks
+            future_to_batch = {
+                executor.submit(_enrich_batch, batch, api_key, batch_index): batch_index 
+                for batch_index, batch in batches
+            }
+            
+            # Collect results as they complete
+            batch_results = {}
+            for future in as_completed(future_to_batch):
+                batch_index, results, error = future.result()
+                batch_results[batch_index] = (results, error)
+                if error:
+                    errors.append(error)
+        
+        # Combine results in order
+        for batch_index in sorted(batch_results.keys()):
+            results, error = batch_results[batch_index]
             if error:
-                errors.append(error)
+                continue  # Skip failed batches
+            api_enriched_results.extend(results)
+        
+        # If any batch failed, raise the first error
+        if errors:
+            raise errors[0]
+        
+        # Step 3: Store newly enriched contacts in database
+        for enriched_person in api_enriched_results:
+            apollo_id = enriched_person.get('id')
+            if apollo_id:
+                try:
+                    # Store complete enrichment data
+                    store_enriched_lead(apollo_id, enriched_person)
+                except Exception as e:
+                    # Log error but continue processing
+                    sentry_sdk.capture_exception(e)
+                    print(f"Warning: Failed to store enriched lead {apollo_id}: {e}")
+        
+        # Map API results back to original indices
+        api_idx = 0
+        for orig_idx, _ in needs_enrichment:
+            if api_idx < len(api_enriched_results):
+                enrichment_map[orig_idx] = api_enriched_results[api_idx]
+                api_idx += 1
     
-    # Combine results in order
-    for batch_index in sorted(batch_results.keys()):
-        results, error = batch_results[batch_index]
-        enriched_results.extend(results)
+    # Step 4: Combine results maintaining original order
+    final_results = []
+    for idx in range(len(people_list)):
+        if idx in enrichment_map:
+            enriched_person = enrichment_map[idx]
+            # Only include if email exists (filtered by API or DB)
+            if enriched_person.get('email'):
+                final_results.append(enriched_person)
     
-    # If any batch failed, raise the first error
-    if errors:
-        raise errors[0]
-
-
-
-
-    return enriched_results
+    return final_results
 
 if __name__ == "__main__":
     # Test script same as before...
