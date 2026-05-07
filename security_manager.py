@@ -9,6 +9,10 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 # We use a MASTER_KEY from environment variables to encrypt/decrypt individual user keys.
 MASTER_SECRET = os.getenv("MASTER_ENCRYPTION_SECRET")
 
+# Old master secret for decrypting keys encrypted with a previous secret
+# Set this when rotating MASTER_ENCRYPTION_SECRET to allow decryption of old keys
+OLD_MASTER_SECRET = os.getenv("OLD_MASTER_ENCRYPTION_SECRET")
+
 # Legacy fallback key for backward compatibility during migration
 # This was the original hardcoded key used before environment variable was required
 LEGACY_MASTER_SECRET = "club-safety-first-12345"
@@ -36,6 +40,12 @@ def get_encryption_key():
         )
     return _derive_key_from_secret(MASTER_SECRET)
 
+def get_old_encryption_key():
+    """Derives a key from the old master secret (for decrypting keys encrypted with previous secret)."""
+    if not OLD_MASTER_SECRET:
+        return None
+    return _derive_key_from_secret(OLD_MASTER_SECRET)
+
 def get_legacy_encryption_key():
     """Derives a key from the legacy hardcoded secret (for backward compatibility)."""
     return _derive_key_from_secret(LEGACY_MASTER_SECRET)
@@ -56,8 +66,12 @@ def encrypt_key(plain_text):
 
 def decrypt_key(encrypted_text):
     """
-    Decrypts an encrypted string, trying the current key first, then falling back to legacy key.
-    This supports migration from the old hardcoded key to the environment variable.
+    Decrypts an encrypted string, trying keys in this order:
+    1. Current MASTER_ENCRYPTION_SECRET
+    2. OLD_MASTER_ENCRYPTION_SECRET (if set, for keys encrypted with previous secret)
+    3. Legacy hardcoded secret (for backward compatibility)
+    
+    This supports secret rotation without losing access to existing encrypted data.
     """
     if not encrypted_text: return None
     
@@ -68,13 +82,30 @@ def decrypt_key(encrypted_text):
             decrypted = f.decrypt(encrypted_text.encode()).decode()
             return decrypted
         except InvalidToken:
-            # Current key failed, try legacy key for backward compatibility
+            # Current key failed, try old secret (if set)
             pass
         except Exception as e:
-            # Other errors (not just wrong key) - log and continue to legacy attempt
+            # Other errors (not just wrong key) - log and continue to next attempt
             sentry_sdk.capture_exception(e)
     
-    # Fallback to legacy key (for data encrypted with old hardcoded key)
+    # Second, try with the old master secret (for keys encrypted before rotation)
+    if OLD_MASTER_SECRET:
+        try:
+            f_old = Fernet(get_old_encryption_key())
+            decrypted = f_old.decrypt(encrypted_text.encode()).decode()
+            # Log that we used old key (for migration tracking)
+            sentry_sdk.capture_message(
+                "Decrypted API key using OLD_MASTER_ENCRYPTION_SECRET (re-encrypt with new secret recommended)",
+                level="info"
+            )
+            return decrypted
+        except InvalidToken:
+            # Old key also failed, try legacy key
+            pass
+        except Exception as e:
+            sentry_sdk.capture_exception(e)
+    
+    # Third, fallback to legacy key (for data encrypted with old hardcoded key)
     try:
         f_legacy = Fernet(get_legacy_encryption_key())
         decrypted = f_legacy.decrypt(encrypted_text.encode()).decode()
@@ -85,8 +116,8 @@ def decrypt_key(encrypted_text):
         )
         return decrypted
     except InvalidToken:
-        # Both keys failed - this is truly invalid data
-        error_msg = "Failed to decrypt: Invalid token (neither current nor legacy key worked)"
+        # All keys failed - this is truly invalid data
+        error_msg = "Failed to decrypt: Invalid token (current, old, and legacy keys all failed)"
         sentry_sdk.capture_message(error_msg, level="error")
         return None
     except Exception as e:

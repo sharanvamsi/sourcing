@@ -9,3 +9,4 @@ gspread
 google-auth
 flask
 flask-cors
+sendgrid>=6.9.0

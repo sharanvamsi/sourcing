@@ -6,7 +6,7 @@ import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 from experiment_search import search_people
-from db_manager import get_lead_by_id, is_lead_enriched, store_enriched_lead
+from db_manager import get_lead_by_id, is_lead_enriched, store_enriched_lead, check_team_basket_duplicates
 
 load_dotenv()
 
@@ -50,18 +50,24 @@ def _enrich_batch(batch, api_key, batch_index):
         sentry_sdk.capture_exception(e)
         return batch_index, [], e
 
-def enrich_people(people_list, max_workers=5):
+def enrich_people(people_list, max_workers=5, team_name=None):
     """
     Enriches a list of people using Apollo's bulk_match endpoint.
     Checks database first to avoid redundant API calls for already-enriched contacts.
+    If team_name is provided, also checks team basket for duplicates (saves credits).
     Batches in groups of 10 and processes batches in parallel.
-    
+
     Args:
         people_list: List of people dictionaries to enrich
         max_workers: Maximum number of parallel API calls (default: 5)
-    
+        team_name: Optional team name to check for duplicates in team basket
+
     Returns:
-        List of enriched people with emails revealed
+        dict with keys:
+            - 'enriched': List of enriched people with emails revealed
+            - 'skipped_duplicates': List of leads that were skipped (already in team basket)
+            - 'credits_used': Number of credits actually used (excludes duplicates)
+        If team_name is None, returns just the list for backward compatibility.
     """
     api_key = os.getenv("APOLLO_API_KEY")
     if not api_key:
@@ -71,20 +77,32 @@ def enrich_people(people_list, max_workers=5):
         raise ValueError(error_msg)
 
     if not people_list:
+        if team_name:
+            return {'enriched': [], 'skipped_duplicates': [], 'credits_used': 0}
         return []
+
+    # Step 0: If team_name provided, check for duplicates in team basket first
+    skipped_duplicates = []
+    if team_name:
+        duplicates, people_list = check_team_basket_duplicates(team_name, people_list)
+        skipped_duplicates = duplicates
+
+        if not people_list:
+            # All leads are duplicates
+            return {'enriched': [], 'skipped_duplicates': skipped_duplicates, 'credits_used': 0}
 
     # Step 1: Check database for already-enriched contacts
     already_enriched = []
     needs_enrichment = []
     enrichment_map = {}  # Maps original index to enriched data from DB
-    
+
     for idx, person in enumerate(people_list):
         apollo_id = person.get('id')
         if not apollo_id:
             # If no ID, we need to enrich via API
             needs_enrichment.append((idx, person))
             continue
-        
+
         # Check if already enriched in database
         if is_lead_enriched(apollo_id):
             # Get enriched data from database
@@ -167,7 +185,17 @@ def enrich_people(people_list, max_workers=5):
             # Only include if email exists (filtered by API or DB)
             if enriched_person.get('email'):
                 final_results.append(enriched_person)
-    
+
+    # Calculate credits used (only API calls cost credits, not DB lookups)
+    credits_used = len([p for _, p in needs_enrichment])
+
+    if team_name:
+        return {
+            'enriched': final_results,
+            'skipped_duplicates': skipped_duplicates,
+            'credits_used': credits_used
+        }
+
     return final_results
 
 if __name__ == "__main__":

@@ -328,12 +328,12 @@ def migrate_team_credits_column():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
+
         # Check if total_credits_used column exists
         if DATABASE_URL:
             cursor.execute("""
-                SELECT column_name 
-                FROM information_schema.columns 
+                SELECT column_name
+                FROM information_schema.columns
                 WHERE table_name='teams' AND column_name='total_credits_used'
             """)
             has_column = cursor.fetchone() is not None
@@ -342,7 +342,7 @@ def migrate_team_credits_column():
             cursor.execute("PRAGMA table_info(teams)")
             columns = [row[1] for row in cursor.fetchall()]
             has_column = 'total_credits_used' in columns
-        
+
         if not has_column:
             # Add total_credits_used column
             if DATABASE_URL:
@@ -352,19 +352,154 @@ def migrate_team_credits_column():
                 cursor.execute("ALTER TABLE teams ADD COLUMN total_credits_used INTEGER DEFAULT 0")
             conn.commit()
             print("✅ Added total_credits_used column to teams table")
-            
+
             # Calculate initial team totals by summing all team members' total_credits_used
             cursor.execute("""
-                UPDATE teams 
+                UPDATE teams
                 SET total_credits_used = (
-                    SELECT COALESCE(SUM(total_credits_used), 0) 
-                    FROM users 
+                    SELECT COALESCE(SUM(total_credits_used), 0)
+                    FROM users
                     WHERE users.team_name = teams.name
                 )
             """)
             conn.commit()
             print("✅ Calculated initial team credit totals from member totals")
-        
+
+        release_db_connection(conn)
+    except Exception as e:
+        sentry_sdk.capture_exception(e)
+        print(f"⚠️  Migration warning: {e}")
+
+def migrate_user_role_column():
+    """Migrates users table to add role column if it doesn't exist."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Check if role column exists
+        if DATABASE_URL:
+            cursor.execute("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name='users' AND column_name='role'
+            """)
+            has_column = cursor.fetchone() is not None
+        else:
+            # SQLite check
+            cursor.execute("PRAGMA table_info(users)")
+            columns = [row[1] for row in cursor.fetchall()]
+            has_column = 'role' in columns
+
+        if not has_column:
+            # Add role column with default 'consultant'
+            if DATABASE_URL:
+                cursor.execute("""
+                    ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'consultant'
+                    CHECK (role IN ('consultant', 'pm'))
+                """)
+            else:
+                # SQLite: Add column with default value (no CHECK constraint in SQLite ADD COLUMN)
+                cursor.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'consultant'")
+            conn.commit()
+            print("✅ Added role column to users table")
+
+        release_db_connection(conn)
+    except Exception as e:
+        sentry_sdk.capture_exception(e)
+        print(f"⚠️  Migration warning: {e}")
+
+def migrate_user_blacklist_exempt_column():
+    """Migrates users table to add blacklist_exempt column if it doesn't exist."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        if DATABASE_URL:
+            cursor.execute("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name='users' AND column_name='blacklist_exempt'
+            """)
+            has_column = cursor.fetchone() is not None
+        else:
+            cursor.execute("PRAGMA table_info(users)")
+            columns = [row[1] for row in cursor.fetchall()]
+            has_column = 'blacklist_exempt' in columns
+
+        if not has_column:
+            if DATABASE_URL:
+                cursor.execute("ALTER TABLE users ADD COLUMN blacklist_exempt BOOLEAN DEFAULT FALSE")
+            else:
+                cursor.execute("ALTER TABLE users ADD COLUMN blacklist_exempt INTEGER DEFAULT 0")
+            conn.commit()
+            print("✅ Added blacklist_exempt column to users table")
+
+        release_db_connection(conn)
+    except Exception as e:
+        sentry_sdk.capture_exception(e)
+        print(f"⚠️  Migration warning: {e}")
+
+def migrate_user_membership_column():
+    """Migrates users table to add membership column if it doesn't exist (aba vs external)."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        if DATABASE_URL:
+            cursor.execute("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name='users' AND column_name='membership'
+            """)
+            has_column = cursor.fetchone() is not None
+        else:
+            cursor.execute("PRAGMA table_info(users)")
+            columns = [row[1] for row in cursor.fetchall()]
+            has_column = 'membership' in columns
+
+        if not has_column:
+            # Default everyone to ABA to preserve existing behavior
+            if DATABASE_URL:
+                cursor.execute("ALTER TABLE users ADD COLUMN membership TEXT DEFAULT 'aba'")
+            else:
+                cursor.execute("ALTER TABLE users ADD COLUMN membership TEXT DEFAULT 'aba'")
+            conn.commit()
+            print("✅ Added membership column to users table")
+
+        release_db_connection(conn)
+    except Exception as e:
+        sentry_sdk.capture_exception(e)
+        print(f"⚠️  Migration warning: {e}")
+
+def migrate_user_keys_sendgrid():
+    """Migrates user_keys table to add sendgrid_api_key_enc column if it doesn't exist."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Check if sendgrid_api_key_enc column exists
+        if DATABASE_URL:
+            cursor.execute("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name='user_keys' AND column_name='sendgrid_api_key_enc'
+            """)
+            has_column = cursor.fetchone() is not None
+        else:
+            # SQLite check
+            cursor.execute("PRAGMA table_info(user_keys)")
+            columns = [row[1] for row in cursor.fetchall()]
+            has_column = 'sendgrid_api_key_enc' in columns
+
+        if not has_column:
+            # Add sendgrid_api_key_enc column
+            if DATABASE_URL:
+                cursor.execute("ALTER TABLE user_keys ADD COLUMN sendgrid_api_key_enc TEXT")
+            else:
+                cursor.execute("ALTER TABLE user_keys ADD COLUMN sendgrid_api_key_enc TEXT")
+            conn.commit()
+            print("✅ Added sendgrid_api_key_enc column to user_keys table")
+
         release_db_connection(conn)
     except Exception as e:
         sentry_sdk.capture_exception(e)
@@ -397,6 +532,8 @@ def init_db():
                 team_name TEXT NOT NULL,
                 password_hash TEXT,
                 is_admin BOOLEAN DEFAULT {bool_default},
+                blacklist_exempt BOOLEAN DEFAULT {bool_default},
+                membership TEXT DEFAULT 'aba',
                 total_credits_used INTEGER DEFAULT 0,
                 FOREIGN KEY (team_name) REFERENCES teams(name)
             )
@@ -409,6 +546,8 @@ def init_db():
                 team_name TEXT NOT NULL,
                 password_hash TEXT,
                 is_admin INTEGER DEFAULT {bool_default},
+                blacklist_exempt INTEGER DEFAULT {bool_default},
+                membership TEXT DEFAULT 'aba',
                 total_credits_used INTEGER DEFAULT 0,
                 FOREIGN KEY (team_name) REFERENCES teams(name)
             )
@@ -544,6 +683,177 @@ def init_db():
             )
         ''')
 
+    # 12. Team Baskets (shared lead inventory per team)
+    if DATABASE_URL:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS team_baskets (
+                id SERIAL PRIMARY KEY,
+                team_name TEXT NOT NULL UNIQUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (team_name) REFERENCES teams(name)
+            )
+        ''')
+    else:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS team_baskets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                team_name TEXT NOT NULL UNIQUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (team_name) REFERENCES teams(name)
+            )
+        ''')
+
+    # 13. Team Basket Leads (enriched leads in team basket)
+    cursor.execute(f'''
+        CREATE TABLE IF NOT EXISTS team_basket_leads (
+            team_basket_id INTEGER NOT NULL,
+            lead_id TEXT NOT NULL,
+            added_by TEXT NOT NULL,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            is_contacted BOOLEAN DEFAULT {bool_default},
+            contacted_by TEXT,
+            contacted_at TIMESTAMP,
+            PRIMARY KEY (team_basket_id, lead_id),
+            FOREIGN KEY (team_basket_id) REFERENCES team_baskets(id),
+            FOREIGN KEY (lead_id) REFERENCES leads(apollo_id),
+            FOREIGN KEY (added_by) REFERENCES users(email)
+        )
+    ''')
+
+    # 14. Email Templates
+    if DATABASE_URL:
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS email_templates (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                body_html TEXT NOT NULL,
+                body_text TEXT,
+                created_by TEXT NOT NULL,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (created_by) REFERENCES users(email)
+            )
+        ''')
+    else:
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS email_templates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                body_html TEXT NOT NULL,
+                body_text TEXT,
+                created_by TEXT NOT NULL,
+                is_active INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (created_by) REFERENCES users(email)
+            )
+        ''')
+
+    # 15. Email Campaigns
+    if DATABASE_URL:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS email_campaigns (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                team_name TEXT NOT NULL,
+                template_id INTEGER,
+                sender_email TEXT NOT NULL,
+                sender_name TEXT,
+                created_by TEXT NOT NULL,
+                status TEXT DEFAULT 'draft',
+                total_recipients INTEGER DEFAULT 0,
+                sent_count INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (team_name) REFERENCES teams(name),
+                FOREIGN KEY (template_id) REFERENCES email_templates(id),
+                FOREIGN KEY (created_by) REFERENCES users(email)
+            )
+        ''')
+    else:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS email_campaigns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                team_name TEXT NOT NULL,
+                template_id INTEGER,
+                sender_email TEXT NOT NULL,
+                sender_name TEXT,
+                created_by TEXT NOT NULL,
+                status TEXT DEFAULT 'draft',
+                total_recipients INTEGER DEFAULT 0,
+                sent_count INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (team_name) REFERENCES teams(name),
+                FOREIGN KEY (template_id) REFERENCES email_templates(id),
+                FOREIGN KEY (created_by) REFERENCES users(email)
+            )
+        ''')
+
+    # 16. Sent Emails (individual email tracking)
+    if DATABASE_URL:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS sent_emails (
+                id SERIAL PRIMARY KEY,
+                campaign_id INTEGER NOT NULL,
+                lead_id TEXT NOT NULL,
+                recipient_email TEXT NOT NULL,
+                sendgrid_message_id TEXT,
+                status TEXT DEFAULT 'pending',
+                sent_at TIMESTAMP,
+                opened_at TIMESTAMP,
+                clicked_at TIMESTAMP,
+                open_count INTEGER DEFAULT 0,
+                click_count INTEGER DEFAULT 0,
+                FOREIGN KEY (campaign_id) REFERENCES email_campaigns(id),
+                FOREIGN KEY (lead_id) REFERENCES leads(apollo_id)
+            )
+        ''')
+    else:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS sent_emails (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id INTEGER NOT NULL,
+                lead_id TEXT NOT NULL,
+                recipient_email TEXT NOT NULL,
+                sendgrid_message_id TEXT,
+                status TEXT DEFAULT 'pending',
+                sent_at TIMESTAMP,
+                opened_at TIMESTAMP,
+                clicked_at TIMESTAMP,
+                open_count INTEGER DEFAULT 0,
+                click_count INTEGER DEFAULT 0,
+                FOREIGN KEY (campaign_id) REFERENCES email_campaigns(id),
+                FOREIGN KEY (lead_id) REFERENCES leads(apollo_id)
+            )
+        ''')
+
+    # 17. Email Events (webhook event tracking)
+    if DATABASE_URL:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS email_events (
+                id SERIAL PRIMARY KEY,
+                sent_email_id INTEGER,
+                sendgrid_message_id TEXT,
+                event_type TEXT NOT NULL,
+                event_data TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (sent_email_id) REFERENCES sent_emails(id)
+            )
+        ''')
+    else:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS email_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sent_email_id INTEGER,
+                sendgrid_message_id TEXT,
+                event_type TEXT NOT NULL,
+                event_data TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (sent_email_id) REFERENCES sent_emails(id)
+            )
+        ''')
+
     if DATABASE_URL:
         try:
             conn.commit()
@@ -553,13 +863,17 @@ def init_db():
     else:
         conn.commit()
     release_db_connection(conn)
-    
+
     # Run migrations for schema updates
     migrate_users_schema()  # Add is_admin column if missing
     migrate_user_keys_schema()  # Migrate user_keys to single-key schema
     migrate_team_requirement()  # Enforce team_name NOT NULL and foreign key
     migrate_user_credits_column()  # Add total_credits_used column and calculate initial totals
     migrate_team_credits_column()  # Add total_credits_used column to teams and calculate initial totals
+    migrate_user_role_column()  # Add role column to users
+    migrate_user_blacklist_exempt_column()  # Add blacklist_exempt column to users
+    migrate_user_membership_column()  # Add membership column to users
+    migrate_user_keys_sendgrid()  # Add sendgrid_api_key_enc column to user_keys
 
 def log_audit_event(email, event_type, details=None):
     """Logs a security or business event to the audit_logs table and Sentry."""
@@ -578,35 +892,47 @@ def log_audit_event(email, event_type, details=None):
 
 def get_all_users():
     """Retrieves all users from the database."""
-    return query("SELECT email, name, team_name, is_admin FROM users ORDER BY name")
+    return query("SELECT email, name, team_name, is_admin, role, blacklist_exempt, membership FROM users ORDER BY name")
 
 def get_user(email):
     """Retrieves a single user by email."""
-    res = query("SELECT email, name, team_name, is_admin FROM users WHERE email = ?", (email.lower().strip(),))
+    res = query("SELECT email, name, team_name, is_admin, role, blacklist_exempt, membership FROM users WHERE email = ?", (email.lower().strip(),))
     return res[0] if res else None
-def add_user(email, name, team_name, is_admin=False):
+def add_user(email, name, team_name, is_admin=False, role='consultant', blacklist_exempt=False, membership='aba'):
     """Adds or updates a user in the database roster."""
     # Validate team_name
     if not team_name or not team_name.strip():
         raise ValueError("team_name is required and cannot be empty")
-    
+
     team_name = team_name.strip()
-    
+
     # Validate team_name is in allowed teams list
     if team_name not in ALLOWED_TEAMS:
         raise ValueError(f"team_name must be one of: {', '.join(ALLOWED_TEAMS)}. Got: '{team_name}'")
-    
+
+    # Validate role
+    if role not in ('consultant', 'pm'):
+        raise ValueError(f"role must be 'consultant' or 'pm'. Got: '{role}'")
+
+    # Validate membership
+    membership = (membership or 'aba').strip().lower()
+    if membership not in ('aba', 'external'):
+        raise ValueError("membership must be 'aba' or 'external'")
+
     # Ensure team exists in teams table (defensive check)
     query("INSERT INTO teams (name) VALUES (?) ON CONFLICT DO NOTHING", (team_name,))
-    
+
     query('''
-        INSERT INTO users (email, name, team_name, is_admin)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(email) DO UPDATE SET 
-            name=EXCLUDED.name, 
-            team_name=EXCLUDED.team_name, 
-            is_admin=EXCLUDED.is_admin
-    ''', (email, name, team_name, bool(is_admin)))
+        INSERT INTO users (email, name, team_name, is_admin, role, blacklist_exempt, membership)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(email) DO UPDATE SET
+            name=EXCLUDED.name,
+            team_name=EXCLUDED.team_name,
+            is_admin=EXCLUDED.is_admin,
+            role=EXCLUDED.role,
+            blacklist_exempt=EXCLUDED.blacklist_exempt,
+            membership=EXCLUDED.membership
+    ''', (email, name, team_name, bool(is_admin), role, bool(blacklist_exempt), membership))
     log_audit_event(email, "USER_ROSTER_UPDATED", f"User {name} added/updated via DB")
 
 def migrate_roster_to_db(roster_data):
@@ -731,17 +1057,18 @@ def query(q, params=()):
 def sync_roster(roster_data):
     for entry in roster_data:
         team_name = entry.get('team_name', '').strip()
-        
+
         # Validate team_name is in allowed teams
         if not team_name or team_name not in ALLOWED_TEAMS:
             raise ValueError(f"Invalid team_name '{team_name}' for user {entry.get('email')}. Must be one of: {', '.join(ALLOWED_TEAMS)}")
-        
+
         # Ensure team exists in teams table
         query("INSERT INTO teams (name) VALUES (?) ON CONFLICT DO NOTHING", (team_name,))
-        
+
         # Use add_user for validation and proper handling
         is_admin = entry.get('is_admin', False)
-        add_user(entry['email'], entry['name'], team_name, is_admin=is_admin)
+        role = entry.get('role', 'consultant')
+        add_user(entry['email'], entry['name'], team_name, is_admin=is_admin, role=role)
 
 def get_basket_leads(user_email):
     rows = query("SELECT id FROM baskets WHERE user_email = ?", (user_email,))
@@ -1001,33 +1328,428 @@ def cleanup_expired_sessions():
 def check_team_credit_limit(team_name, credits_to_add=0):
     """
     Checks if a team can perform an operation that would add credits.
-    
+
     Args:
         team_name: Name of the team
         credits_to_add: Number of credits that would be added (default: 0, just checking current status)
-    
+
     Returns:
         tuple: (is_allowed: bool, remaining_credits: int, current_credits: int)
     """
     # Exec Board team has no limit
     if team_name == EXEC_TEAM_NAME:
         return (True, None, get_team_credit_total(team_name))
-    
+
     # Get current team credits
     current_credits = get_team_credit_total(team_name)
-    
+
     # Calculate total after adding credits
     total_after = current_credits + credits_to_add
-    
+
     # Check if it would exceed limit
     if total_after > TEAM_CREDIT_LIMIT:
         remaining = max(0, TEAM_CREDIT_LIMIT - current_credits)
         return (False, remaining, current_credits)
-    
+
     # Check if already at or over limit (for search blocking)
     if current_credits >= TEAM_CREDIT_LIMIT:
         return (False, 0, current_credits)
-    
+
     # Within limit
     remaining = TEAM_CREDIT_LIMIT - total_after
     return (True, remaining, current_credits)
+
+
+# --- TEAM BASKET FUNCTIONS ---
+
+def get_or_create_team_basket(team_name):
+    """Gets or creates a team basket for the given team."""
+    rows = query("SELECT id FROM team_baskets WHERE team_name = ?", (team_name,))
+    if rows:
+        return rows[0]['id']
+    # Create new team basket
+    query("INSERT INTO team_baskets (team_name) VALUES (?)", (team_name,))
+    rows = query("SELECT id FROM team_baskets WHERE team_name = ?", (team_name,))
+    return rows[0]['id'] if rows else None
+
+def get_team_basket_leads(team_name, filter_contacted=None):
+    """
+    Gets all leads in a team's basket.
+
+    Args:
+        team_name: Name of the team
+        filter_contacted: None for all, True for contacted only, False for non-contacted only
+
+    Returns:
+        List of lead dictionaries with basket metadata
+    """
+    basket_id = get_or_create_team_basket(team_name)
+
+    base_query = '''
+        SELECT l.*, tbl.added_by, tbl.added_at, tbl.is_contacted, tbl.contacted_by, tbl.contacted_at
+        FROM leads l
+        JOIN team_basket_leads tbl ON l.apollo_id = tbl.lead_id
+        WHERE tbl.team_basket_id = ?
+    '''
+
+    if filter_contacted is True:
+        base_query += " AND tbl.is_contacted = " + ("TRUE" if DATABASE_URL else "1")
+    elif filter_contacted is False:
+        base_query += " AND (tbl.is_contacted = " + ("FALSE" if DATABASE_URL else "0") + " OR tbl.is_contacted IS NULL)"
+
+    base_query += " ORDER BY tbl.added_at DESC"
+
+    rows = query(base_query, (basket_id,))
+
+    results = []
+    for r in rows:
+        lead = dict(r)
+        lead = convert_datetime_to_str(lead)
+        if lead.get('apollo_data'):
+            try:
+                lead.update(json.loads(lead['apollo_data']))
+            except (json.JSONDecodeError, TypeError) as e:
+                sentry_sdk.capture_exception(e)
+        results.append(lead)
+    return results
+
+def is_lead_in_team_basket(team_name, apollo_id):
+    """Checks if a lead is already in the team's basket."""
+    basket_id = get_or_create_team_basket(team_name)
+    rows = query(
+        "SELECT 1 FROM team_basket_leads WHERE team_basket_id = ? AND lead_id = ?",
+        (basket_id, apollo_id)
+    )
+    return len(rows) > 0
+
+def check_team_basket_duplicates(team_name, leads):
+    """
+    Checks which leads are already in the team basket.
+
+    Args:
+        team_name: Name of the team
+        leads: List of lead dictionaries with 'id' field
+
+    Returns:
+        tuple: (duplicates list, non_duplicates list)
+    """
+    basket_id = get_or_create_team_basket(team_name)
+    duplicates = []
+    non_duplicates = []
+
+    for lead in leads:
+        apollo_id = lead.get('id') or lead.get('apollo_id')
+        if not apollo_id:
+            non_duplicates.append(lead)
+            continue
+
+        rows = query(
+            "SELECT 1 FROM team_basket_leads WHERE team_basket_id = ? AND lead_id = ?",
+            (basket_id, apollo_id)
+        )
+        if rows:
+            duplicates.append(lead)
+        else:
+            non_duplicates.append(lead)
+
+    return duplicates, non_duplicates
+
+def add_leads_to_team_basket(team_name, leads, added_by):
+    """
+    Adds enriched leads to the team basket.
+
+    Args:
+        team_name: Name of the team
+        leads: List of enriched lead dictionaries
+        added_by: Email of user who enriched the leads
+
+    Returns:
+        Number of leads added (excluding duplicates)
+    """
+    basket_id = get_or_create_team_basket(team_name)
+    added_count = 0
+
+    for lead in leads:
+        apollo_id = lead.get('id') or lead.get('apollo_id')
+        if not apollo_id:
+            continue
+
+        # Skip if already in basket
+        if is_lead_in_team_basket(team_name, apollo_id):
+            continue
+
+        query('''
+            INSERT INTO team_basket_leads (team_basket_id, lead_id, added_by)
+            VALUES (?, ?, ?)
+            ON CONFLICT DO NOTHING
+        ''', (basket_id, apollo_id, added_by))
+        added_count += 1
+
+    return added_count
+
+def mark_lead_contacted(team_name, lead_id, pm_email):
+    """Marks a lead as contacted after PM sends email."""
+    basket_id = get_or_create_team_basket(team_name)
+    query('''
+        UPDATE team_basket_leads
+        SET is_contacted = ?, contacted_by = ?, contacted_at = ?
+        WHERE team_basket_id = ? AND lead_id = ?
+    ''', (True if DATABASE_URL else 1, pm_email, datetime.now(), basket_id, lead_id))
+
+def get_team_basket_stats(team_name):
+    """Gets statistics for a team's basket."""
+    basket_id = get_or_create_team_basket(team_name)
+
+    total = query(
+        "SELECT COUNT(*) as count FROM team_basket_leads WHERE team_basket_id = ?",
+        (basket_id,)
+    )
+
+    contacted_condition = "TRUE" if DATABASE_URL else "1"
+    contacted = query(
+        f"SELECT COUNT(*) as count FROM team_basket_leads WHERE team_basket_id = ? AND is_contacted = {contacted_condition}",
+        (basket_id,)
+    )
+
+    total_count = total[0]['count'] if total else 0
+    contacted_count = contacted[0]['count'] if contacted else 0
+
+    return {
+        'total': total_count,
+        'contacted': contacted_count,
+        'available': total_count - contacted_count
+    }
+
+
+# --- EMAIL TEMPLATE & CAMPAIGN FUNCTIONS ---
+
+def get_email_templates(user_email=None, active_only=True):
+    """Gets email templates, optionally filtered by creator."""
+    base_query = "SELECT * FROM email_templates"
+    conditions = []
+    params = []
+
+    if active_only:
+        active_condition = "TRUE" if DATABASE_URL else "1"
+        conditions.append(f"is_active = {active_condition}")
+
+    if user_email:
+        conditions.append("created_by = ?")
+        params.append(user_email)
+
+    if conditions:
+        base_query += " WHERE " + " AND ".join(conditions)
+
+    base_query += " ORDER BY created_at DESC"
+
+    rows = query(base_query, tuple(params))
+    return [convert_datetime_to_str(dict(r)) for r in rows]
+
+def get_email_template(template_id):
+    """Gets a single email template by ID."""
+    rows = query("SELECT * FROM email_templates WHERE id = ?", (template_id,))
+    if rows:
+        return convert_datetime_to_str(dict(rows[0]))
+    return None
+
+def save_email_template(name, subject, body_html, body_text, created_by, template_id=None):
+    """Creates or updates an email template."""
+    if template_id:
+        # Update existing
+        query('''
+            UPDATE email_templates
+            SET name = ?, subject = ?, body_html = ?, body_text = ?
+            WHERE id = ?
+        ''', (name, subject, body_html, body_text, template_id))
+        return template_id
+    else:
+        # Create new
+        query('''
+            INSERT INTO email_templates (name, subject, body_html, body_text, created_by)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (name, subject, body_html, body_text, created_by))
+        # Get the newly created template ID
+        rows = query(
+            "SELECT id FROM email_templates WHERE name = ? AND created_by = ? ORDER BY created_at DESC LIMIT 1",
+            (name, created_by)
+        )
+        return rows[0]['id'] if rows else None
+
+def delete_email_template(template_id):
+    """Soft deletes an email template by setting is_active to false."""
+    inactive = "FALSE" if DATABASE_URL else "0"
+    query(f"UPDATE email_templates SET is_active = {inactive} WHERE id = ?", (template_id,))
+
+def create_campaign(name, team_name, template_id, sender_email, sender_name, created_by, lead_ids):
+    """
+    Creates a new email campaign.
+
+    Args:
+        name: Campaign name
+        team_name: Team name
+        template_id: Template ID to use
+        sender_email: Sender email address
+        sender_name: Sender display name
+        created_by: PM email who created
+        lead_ids: List of lead IDs to include
+
+    Returns:
+        Campaign ID
+    """
+    query('''
+        INSERT INTO email_campaigns (name, team_name, template_id, sender_email, sender_name, created_by, total_recipients, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'draft')
+    ''', (name, team_name, template_id, sender_email, sender_name, created_by, len(lead_ids)))
+
+    # Get the campaign ID
+    rows = query(
+        "SELECT id FROM email_campaigns WHERE name = ? AND created_by = ? ORDER BY created_at DESC LIMIT 1",
+        (name, created_by)
+    )
+    campaign_id = rows[0]['id'] if rows else None
+
+    if campaign_id:
+        # Create sent_emails records for each lead
+        for lead_id in lead_ids:
+            lead = get_lead_by_id(lead_id)
+            if lead and lead.get('email'):
+                query('''
+                    INSERT INTO sent_emails (campaign_id, lead_id, recipient_email, status)
+                    VALUES (?, ?, ?, 'pending')
+                ''', (campaign_id, lead_id, lead['email']))
+
+    return campaign_id
+
+def get_campaign(campaign_id):
+    """Gets a single campaign by ID."""
+    rows = query("SELECT * FROM email_campaigns WHERE id = ?", (campaign_id,))
+    if rows:
+        return convert_datetime_to_str(dict(rows[0]))
+    return None
+
+def get_team_campaigns(team_name):
+    """Gets all campaigns for a team."""
+    rows = query(
+        "SELECT * FROM email_campaigns WHERE team_name = ? ORDER BY created_at DESC",
+        (team_name,)
+    )
+    return [convert_datetime_to_str(dict(r)) for r in rows]
+
+def update_campaign_status(campaign_id, status):
+    """Updates campaign status."""
+    query("UPDATE email_campaigns SET status = ? WHERE id = ?", (status, campaign_id))
+
+def update_campaign_sent_count(campaign_id, sent_count):
+    """Updates the sent count for a campaign."""
+    query("UPDATE email_campaigns SET sent_count = ? WHERE id = ?", (sent_count, campaign_id))
+
+def get_campaign_emails(campaign_id):
+    """Gets all sent_emails for a campaign."""
+    rows = query(
+        "SELECT * FROM sent_emails WHERE campaign_id = ? ORDER BY id",
+        (campaign_id,)
+    )
+    return [convert_datetime_to_str(dict(r)) for r in rows]
+
+def update_sent_email(sent_email_id, **kwargs):
+    """Updates a sent_email record with the provided fields."""
+    if not kwargs:
+        return
+
+    set_clauses = []
+    params = []
+    for key, value in kwargs.items():
+        set_clauses.append(f"{key} = ?")
+        params.append(value)
+
+    params.append(sent_email_id)
+    query(f"UPDATE sent_emails SET {', '.join(set_clauses)} WHERE id = ?", tuple(params))
+
+def get_sent_email_by_message_id(sendgrid_message_id):
+    """Gets a sent_email by SendGrid message ID."""
+    rows = query(
+        "SELECT * FROM sent_emails WHERE sendgrid_message_id = ?",
+        (sendgrid_message_id,)
+    )
+    if rows:
+        return convert_datetime_to_str(dict(rows[0]))
+    return None
+
+def record_email_event(sent_email_id, sendgrid_message_id, event_type, event_data=None):
+    """Records an email event from webhook."""
+    query('''
+        INSERT INTO email_events (sent_email_id, sendgrid_message_id, event_type, event_data)
+        VALUES (?, ?, ?, ?)
+    ''', (sent_email_id, sendgrid_message_id, event_type, json.dumps(event_data) if event_data else None))
+
+def get_campaign_stats(team_name):
+    """Gets aggregated campaign statistics for a team."""
+    rows = query('''
+        SELECT
+            COUNT(*) as total_campaigns,
+            COALESCE(SUM(total_recipients), 0) as total_recipients,
+            COALESCE(SUM(sent_count), 0) as total_sent
+        FROM email_campaigns
+        WHERE team_name = ?
+    ''', (team_name,))
+
+    if not rows:
+        return {'total_campaigns': 0, 'total_recipients': 0, 'total_sent': 0, 'total_opened': 0, 'total_clicked': 0}
+
+    stats = dict(rows[0])
+
+    # Get open/click counts
+    open_rows = query('''
+        SELECT COUNT(*) as count FROM sent_emails se
+        JOIN email_campaigns ec ON se.campaign_id = ec.id
+        WHERE ec.team_name = ? AND se.opened_at IS NOT NULL
+    ''', (team_name,))
+
+    click_rows = query('''
+        SELECT COUNT(*) as count FROM sent_emails se
+        JOIN email_campaigns ec ON se.campaign_id = ec.id
+        WHERE ec.team_name = ? AND se.clicked_at IS NOT NULL
+    ''', (team_name,))
+
+    stats['total_opened'] = open_rows[0]['count'] if open_rows else 0
+    stats['total_clicked'] = click_rows[0]['count'] if click_rows else 0
+
+    return stats
+
+
+# --- USER ROLE FUNCTIONS ---
+
+def get_user_role(email):
+    """Gets the role of a user (pm or consultant)."""
+    user = get_user(email)
+    if user:
+        return user.get('role', 'consultant')
+    return 'consultant'
+
+def set_user_role(email, role):
+    """Sets the role of a user."""
+    if role not in ('pm', 'consultant'):
+        raise ValueError("Role must be 'pm' or 'consultant'")
+    query("UPDATE users SET role = ? WHERE email = ?", (role, email))
+
+def is_pm(email):
+    """Checks if a user is a PM."""
+    return get_user_role(email) == 'pm'
+
+
+# --- SENDGRID KEY FUNCTIONS ---
+
+def save_sendgrid_key(email, sendgrid_api_key):
+    """Saves encrypted SendGrid API key for a user."""
+    query('''
+        UPDATE user_keys
+        SET sendgrid_api_key_enc = ?
+        WHERE user_email = ?
+    ''', (encrypt_key(sendgrid_api_key), email))
+
+def get_sendgrid_key(email):
+    """Retrieves and decrypts SendGrid API key for a user."""
+    rows = query("SELECT sendgrid_api_key_enc FROM user_keys WHERE user_email = ?", (email,))
+    if not rows or not rows[0].get('sendgrid_api_key_enc'):
+        return None
+    return decrypt_key(rows[0]['sendgrid_api_key_enc'])

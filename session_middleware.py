@@ -21,9 +21,12 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from db_manager import (
-    create_user_session, get_user_from_session, 
-    delete_user_session, get_user
+    create_user_session, get_user_from_session,
+    delete_user_session, get_user,
+    get_sent_email_by_message_id, update_sent_email,
+    record_email_event, mark_lead_contacted, get_campaign
 )
+from datetime import datetime
 
 app = Flask(__name__)
 CORS(app, supports_credentials=True)
@@ -94,16 +97,100 @@ def validate_session():
 def delete_session():
     """Delete session and clear cookie"""
     session_token = request.cookies.get('session_token')
-    
+
     if session_token:
         delete_user_session(session_token)
-    
+
     response = make_response(jsonify({'success': True}))
     response.set_cookie('session_token', '', expires=0, path='/')
-    
+
     return response
+
+
+@app.route('/api/webhooks/sendgrid', methods=['POST'])
+def sendgrid_webhook():
+    """
+    Handle SendGrid webhook events for email tracking.
+
+    Events handled:
+    - delivered: Email was delivered
+    - open: Email was opened
+    - click: Link in email was clicked
+    - bounce: Email bounced
+
+    SendGrid sends an array of event objects.
+    """
+    try:
+        events = request.json
+
+        if not events or not isinstance(events, list):
+            return jsonify({'error': 'Invalid payload'}), 400
+
+        processed = 0
+        for event in events:
+            event_type = event.get('event')
+            sg_message_id = event.get('sg_message_id')
+            timestamp = event.get('timestamp')
+
+            if not sg_message_id:
+                continue
+
+            # Find the sent_email record
+            sent_email = get_sent_email_by_message_id(sg_message_id)
+            if not sent_email:
+                # Try with different message ID formats
+                # SendGrid sometimes sends just the first part
+                if '.' in sg_message_id:
+                    short_id = sg_message_id.split('.')[0]
+                    sent_email = get_sent_email_by_message_id(short_id)
+
+            if not sent_email:
+                continue
+
+            # Record the event
+            record_email_event(
+                sent_email_id=sent_email['id'],
+                sendgrid_message_id=sg_message_id,
+                event_type=event_type,
+                event_data=event
+            )
+
+            # Update sent_email status based on event type
+            if event_type == 'delivered':
+                update_sent_email(sent_email['id'], status='delivered')
+
+            elif event_type == 'open':
+                # First open sets opened_at, subsequent opens increment count
+                updates = {'open_count': sent_email.get('open_count', 0) + 1}
+                if not sent_email.get('opened_at'):
+                    updates['opened_at'] = datetime.now()
+                    updates['status'] = 'opened'
+                update_sent_email(sent_email['id'], **updates)
+
+            elif event_type == 'click':
+                # First click sets clicked_at, subsequent clicks increment count
+                updates = {'click_count': sent_email.get('click_count', 0) + 1}
+                if not sent_email.get('clicked_at'):
+                    updates['clicked_at'] = datetime.now()
+                    updates['status'] = 'clicked'
+                update_sent_email(sent_email['id'], **updates)
+
+            elif event_type == 'bounce':
+                update_sent_email(sent_email['id'], status='bounced')
+
+            processed += 1
+
+        return jsonify({'success': True, 'processed': processed})
+
+    except Exception as e:
+        import sentry_sdk
+        sentry_sdk.capture_exception(e)
+        return jsonify({'error': str(e)}), 500
+
 
 if __name__ == '__main__':
     # Install: pip install flask flask-cors
     app.run(host='127.0.0.1', port=8502, debug=False)
+
+
 

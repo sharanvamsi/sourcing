@@ -88,3 +88,5 @@ If neither middleware nor cookies work, the app falls back to URL query paramete
 - **Cookies not setting**: Verify nginx configuration and SSL certificates
 - **Sessions expiring too quickly**: Adjust `expires_in_hours` in `create_user_session()`
 
+
+
