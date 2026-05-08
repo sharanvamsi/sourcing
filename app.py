@@ -1131,18 +1131,24 @@ def main():
                 with st.form("add_user_form"):
                     nu_email = st.text_input("Member Email")
                     nu_name = st.text_input("Full Name")
-                    nu_team = st.selectbox("Team", options=ALLOWED_TEAMS, index=None, placeholder="Select a team")
-                    nu_role = st.selectbox("Role", options=["consultant", "pm"], index=0, help="PMs can send email campaigns")
                     nu_membership = st.selectbox("Membership", options=["aba", "external"], index=0, help="ABA users are subject to the global blacklist; external users are not.")
+                    
+                    # Only ABA members have teams/roles
+                    nu_team = None
+                    nu_role = "consultant"
+                    if nu_membership == "aba":
+                        nu_team = st.selectbox("Team", options=[t for t in ALLOWED_TEAMS if t != "External"], index=None, placeholder="Select a team")
+                        nu_role = st.selectbox("Role", options=["consultant", "pm"], index=0, help="PMs can send email campaigns")
                     nu_admin = st.checkbox("Is Administrator?")
                     nu_blacklist_exempt = st.checkbox("Blacklist Exempt?", help="If enabled, this user can search domains that are on the global blacklist.")
                     if st.form_submit_button("Save Member"):
-                        if nu_email and nu_name and nu_team:
+                        team_ok = (nu_membership == "external") or bool(nu_team)
+                        if nu_email and nu_name and team_ok:
                             try:
                                 add_user(
                                     nu_email,
                                     nu_name,
-                                    nu_team,
+                                    nu_team or "",
                                     nu_admin,
                                     role=nu_role,
                                     blacklist_exempt=nu_blacklist_exempt,
