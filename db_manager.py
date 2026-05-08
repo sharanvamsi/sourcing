@@ -26,11 +26,13 @@ DB_NAME = "sourcing.db"
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 # Allowed teams - only these teams are valid
-ALLOWED_TEAMS = ["BD", "Finance", "Marketing", "Strategy", "NPO", "Exec Board"]
+# "External" is used as an internal placeholder for non-ABA users.
+ALLOWED_TEAMS = ["BD", "Finance", "Marketing", "Strategy", "NPO", "Exec Board", "External"]
 
 # Team credit limit (Exec Board team has no limit)
 TEAM_CREDIT_LIMIT = 4500
 EXEC_TEAM_NAME = "Exec Board"
+EXTERNAL_TEAM_NAME = "External"
 
 # --- DATABASE CONNECTION POOLING ---
 # We use ThreadedConnectionPool for multi-threaded Streamlit apps
@@ -900,16 +902,6 @@ def get_user(email):
     return res[0] if res else None
 def add_user(email, name, team_name, is_admin=False, role='consultant', blacklist_exempt=False, membership='aba'):
     """Adds or updates a user in the database roster."""
-    # Validate team_name
-    if not team_name or not team_name.strip():
-        raise ValueError("team_name is required and cannot be empty")
-
-    team_name = team_name.strip()
-
-    # Validate team_name is in allowed teams list
-    if team_name not in ALLOWED_TEAMS:
-        raise ValueError(f"team_name must be one of: {', '.join(ALLOWED_TEAMS)}. Got: '{team_name}'")
-
     # Validate role
     if role not in ('consultant', 'pm'):
         raise ValueError(f"role must be 'consultant' or 'pm'. Got: '{role}'")
@@ -918,6 +910,18 @@ def add_user(email, name, team_name, is_admin=False, role='consultant', blacklis
     membership = (membership or 'aba').strip().lower()
     if membership not in ('aba', 'external'):
         raise ValueError("membership must be 'aba' or 'external'")
+
+    # Team handling:
+    # - ABA users must pick a valid team
+    # - External users do not need a team; we store an internal placeholder
+    if membership == "external":
+        team_name = EXTERNAL_TEAM_NAME
+    else:
+        if not team_name or not team_name.strip():
+            raise ValueError("team_name is required and cannot be empty")
+        team_name = team_name.strip()
+        if team_name not in ALLOWED_TEAMS:
+            raise ValueError(f"team_name must be one of: {', '.join(ALLOWED_TEAMS)}. Got: '{team_name}'")
 
     # Ensure team exists in teams table (defensive check)
     query("INSERT INTO teams (name) VALUES (?) ON CONFLICT DO NOTHING", (team_name,))
@@ -1336,8 +1340,8 @@ def check_team_credit_limit(team_name, credits_to_add=0):
     Returns:
         tuple: (is_allowed: bool, remaining_credits: int, current_credits: int)
     """
-    # Exec Board team has no limit
-    if team_name == EXEC_TEAM_NAME:
+    # Exec Board + External have no limit
+    if team_name in (EXEC_TEAM_NAME, EXTERNAL_TEAM_NAME):
         return (True, None, get_team_credit_total(team_name))
 
     # Get current team credits

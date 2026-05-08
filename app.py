@@ -398,7 +398,9 @@ def main():
     with st.sidebar:
         st.subheader("User Profile")
         st.write(f"**Name:** {st.session_state.user['name']}")
-        st.write(f"**Team:** {st.session_state.user['team_name']}")
+        user_membership = (st.session_state.user.get("membership") or "aba").lower()
+        if user_membership == "aba":
+            st.write(f"**Team:** {st.session_state.user['team_name']}")
         st.write(f"**Basket:** {len(st.session_state.basket)} leads")
         
         # Display user's credit usage
@@ -453,10 +455,8 @@ def main():
     # Tabs
     tabs = ["🔍 Search", "🛒 Basket", "👥 Team Leads"]
     # Check if user is PM - use session state user object (loaded at login with role)
-    st.sidebar.write(f"DEBUG session user: {st.session_state.user}")
     user_role = st.session_state.user.get('role', 'consultant')
     user_is_pm = user_role == 'pm'
-    st.sidebar.write(f"DEBUG role: {user_role}, is_pm: {user_is_pm}")
     if user_is_pm:
         tabs.append("📧 Email Outreach")
     # Admin Check: Add Admin tab if DB record says so
