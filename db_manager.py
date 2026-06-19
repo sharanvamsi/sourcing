@@ -902,6 +902,15 @@ def get_user(email):
     return res[0] if res else None
 def add_user(email, name, team_name, is_admin=False, role='consultant', blacklist_exempt=False, membership='aba'):
     """Adds or updates a user in the database roster."""
+    # Normalize identity. get_user() looks up with email.lower().strip(), so we
+    # must store it the same way or the account becomes unreachable (login/audit).
+    email = (email or '').strip().lower()
+    if not email or '@' not in email:
+        raise ValueError("A valid email is required")
+    name = (name or '').strip()
+    if not name:
+        raise ValueError("name is required and cannot be empty")
+
     # Validate role
     if role not in ('consultant', 'pm'):
         raise ValueError(f"role must be 'consultant' or 'pm'. Got: '{role}'")
@@ -938,6 +947,36 @@ def add_user(email, name, team_name, is_admin=False, role='consultant', blacklis
             membership=EXCLUDED.membership
     ''', (email, name, team_name, bool(is_admin), role, bool(blacklist_exempt), membership))
     log_audit_event(email, "USER_ROSTER_UPDATED", f"User {name} added/updated via DB")
+
+def count_admins():
+    """Returns the number of users with admin privileges (used to prevent lockout)."""
+    res = query("SELECT COUNT(*) as count FROM users WHERE is_admin = ?", (True,))
+    return res[0]["count"] if res else 0
+
+def update_user(email, name=None, team_name=None, role=None, is_admin=None, blacklist_exempt=None, membership=None):
+    """Updates an existing user by merging changes onto current values.
+
+    Routes edits through add_user() so the same validation, membership/team
+    syncing and audit logging apply to modifications as well as creation —
+    the PUT endpoint previously bypassed all of these with inline SQL.
+    """
+    existing = get_user(email)
+    if not existing:
+        raise ValueError(f"User not found: {email}")
+    existing = dict(existing)
+
+    def pick(new_value, key):
+        return existing.get(key) if new_value is None else new_value
+
+    add_user(
+        email=email,
+        name=pick(name, "name"),
+        team_name=pick(team_name, "team_name"),
+        is_admin=bool(pick(is_admin, "is_admin")),
+        role=pick(role, "role"),
+        blacklist_exempt=bool(pick(blacklist_exempt, "blacklist_exempt")),
+        membership=pick(membership, "membership"),
+    )
 
 def migrate_roster_to_db(roster_data):
     """Migrates users from roster.json into the DB Users table."""

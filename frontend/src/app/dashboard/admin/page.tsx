@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -12,6 +12,7 @@ import {
   PencilIcon,
   CheckIcon,
   XMarkIcon,
+  UserPlusIcon,
 } from '@heroicons/react/24/outline';
 
 interface User {
@@ -32,6 +33,30 @@ interface Team {
   member_count: number;
 }
 
+// ABA teams a member can belong to. Must stay in sync with ALLOWED_TEAMS in
+// db_manager.py (the "External" placeholder is assigned automatically).
+const ABA_TEAMS = ['BD', 'Finance', 'Marketing', 'Strategy', 'NPO', 'Exec Board'];
+
+type MemberForm = {
+  email: string;
+  name: string;
+  team_name: string;
+  role: string;
+  is_admin: boolean;
+  membership: string;
+  blacklist_exempt: boolean;
+};
+
+const emptyForm: MemberForm = {
+  email: '',
+  name: '',
+  team_name: ABA_TEAMS[0],
+  role: 'consultant',
+  is_admin: false,
+  membership: 'aba',
+  blacklist_exempt: false,
+};
+
 export default function AdminPage() {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<'users' | 'teams' | 'analytics'>('users');
@@ -40,15 +65,13 @@ export default function AdminPage() {
   const [analytics, setAnalytics] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const [search, setSearch] = useState('');
 
-  // Edit user state
-  const [editingUser, setEditingUser] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState({
-    role: '',
-    is_admin: false,
-    membership: 'aba',
-    blacklist_exempt: false,
-  });
+  // Add/Edit member modal state
+  const [modalMode, setModalMode] = useState<'add' | 'edit' | null>(null);
+  const [form, setForm] = useState<MemberForm>(emptyForm);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState('');
 
   // Add credits state
   const [addingCredits, setAddingCredits] = useState<string | null>(null);
@@ -78,23 +101,77 @@ export default function AdminPage() {
     }
   };
 
-  const handleEditUser = (u: User) => {
-    setEditingUser(u.email);
-    setEditForm({
+  const openAddMember = () => {
+    setForm(emptyForm);
+    setFormError('');
+    setModalMode('add');
+  };
+
+  const openEditMember = (u: User) => {
+    setForm({
+      email: u.email,
+      name: u.name,
+      team_name: ABA_TEAMS.includes(u.team_name) ? u.team_name : ABA_TEAMS[0],
       role: u.role,
       is_admin: u.is_admin,
       membership: (u.membership || 'aba') as 'aba' | 'external',
       blacklist_exempt: Boolean(u.blacklist_exempt),
     });
+    setFormError('');
+    setModalMode('edit');
   };
 
-  const handleSaveUser = async (email: string) => {
+  const closeModal = () => {
+    setModalMode(null);
+    setFormError('');
+  };
+
+  const handleSubmitMember = async () => {
+    setFormError('');
+    if (!form.name.trim()) {
+      setFormError('Name is required');
+      return;
+    }
+    if (modalMode === 'add' && (!form.email.trim() || !form.email.includes('@'))) {
+      setFormError('A valid email is required');
+      return;
+    }
+    if (form.membership === 'aba' && !form.team_name) {
+      setFormError('Select a team for ABA members');
+      return;
+    }
+
+    // External members are not tied to an ABA team; the backend stores a placeholder.
+    const team_name = form.membership === 'external' ? 'External' : form.team_name;
+
+    setSaving(true);
     try {
-      await api.updateUser(email, editForm);
-      setEditingUser(null);
+      if (modalMode === 'add') {
+        await api.saveUser({
+          email: form.email.trim(),
+          name: form.name.trim(),
+          team_name,
+          role: form.role,
+          is_admin: form.is_admin,
+          membership: form.membership,
+          blacklist_exempt: form.blacklist_exempt,
+        });
+      } else {
+        await api.updateUser(form.email, {
+          name: form.name.trim(),
+          team_name,
+          role: form.role,
+          is_admin: form.is_admin,
+          membership: form.membership,
+          blacklist_exempt: form.blacklist_exempt,
+        });
+      }
+      closeModal();
       fetchData();
     } catch (err: any) {
-      setError(err.message);
+      setFormError(err.message);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -124,6 +201,16 @@ export default function AdminPage() {
     { id: 'teams' as const, name: 'Teams', icon: BuildingOfficeIcon },
     { id: 'analytics' as const, name: 'Analytics', icon: ChartBarIcon },
   ];
+
+  const filteredUsers = users.filter((u) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      u.name.toLowerCase().includes(q) ||
+      u.email.toLowerCase().includes(q) ||
+      (u.team_name || '').toLowerCase().includes(q)
+    );
+  });
 
   return (
     <div>
@@ -165,116 +252,90 @@ export default function AdminPage() {
           {/* Users Tab */}
           {activeTab === 'users' && (
             <div>
-              <h2 className="text-lg font-semibold mb-4">All Users ({users.length})</h2>
-              <div className="table-container">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Name</th>
-                      <th>Email</th>
-                      <th>Team</th>
-                      <th>Membership</th>
-                      <th>Role</th>
-                      <th>Admin</th>
-                      <th>Credits Used</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {users.map((u) => (
-                      <motion.tr
-                        key={u.email}
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                      >
-                        <td className="font-medium">{u.name}</td>
-                        <td className="text-gray-400">{u.email}</td>
-                        <td>{u.team_name}</td>
-                        <td>
-                          {editingUser === u.email ? (
-                            <select
-                              value={editForm.membership}
-                              onChange={(e) =>
-                                setEditForm({ ...editForm, membership: e.target.value })
-                              }
-                              className="input py-1 px-2 text-sm"
-                            >
-                              <option value="aba">ABA</option>
-                              <option value="external">External</option>
-                            </select>
-                          ) : (
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                <h2 className="text-lg font-semibold">
+                  All Users ({filteredUsers.length}
+                  {search ? ` of ${users.length}` : ''})
+                </h2>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search name, email, team…"
+                    className="input py-2 px-3 text-sm w-56"
+                  />
+                  <button
+                    onClick={openAddMember}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#635bff] text-white hover:bg-[#5249e0] transition-all"
+                  >
+                    <UserPlusIcon className="w-5 h-5" />
+                    Add Member
+                  </button>
+                </div>
+              </div>
+
+              {filteredUsers.length === 0 ? (
+                <div className="card p-12 text-center">
+                  <div className="text-gray-400 mb-2">No members found</div>
+                  <p className="text-sm text-gray-500">
+                    {search
+                      ? 'No members match your search.'
+                      : 'Add your first member to get started.'}
+                  </p>
+                </div>
+              ) : (
+                <div className="table-container">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Team</th>
+                        <th>Membership</th>
+                        <th>Role</th>
+                        <th>Admin</th>
+                        <th>Credits Used</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredUsers.map((u) => (
+                        <motion.tr key={u.email} initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                          <td className="font-medium">{u.name}</td>
+                          <td className="text-gray-400">{u.email}</td>
+                          <td>{u.team_name}</td>
+                          <td>
                             <span className="badge">{(u.membership || 'aba').toUpperCase()}</span>
-                          )}
-                        </td>
-                        <td>
-                          {editingUser === u.email ? (
-                            <select
-                              value={editForm.role}
-                              onChange={(e) =>
-                                setEditForm({ ...editForm, role: e.target.value })
-                              }
-                              className="input py-1 px-2 text-sm"
-                            >
-                              <option value="consultant">Consultant</option>
-                              <option value="pm">PM</option>
-                            </select>
-                          ) : (
-                            <span
-                              className={`badge ${
-                                u.role === 'pm' ? 'badge-success' : ''
-                              }`}
-                            >
+                          </td>
+                          <td>
+                            <span className={`badge ${u.role === 'pm' ? 'badge-success' : ''}`}>
                               {u.role}
                             </span>
-                          )}
-                        </td>
-                        <td>
-                          {editingUser === u.email ? (
-                            <input
-                              type="checkbox"
-                              checked={editForm.is_admin}
-                              onChange={(e) =>
-                                setEditForm({ ...editForm, is_admin: e.target.checked })
-                              }
-                              className="w-4 h-4"
-                            />
-                          ) : u.is_admin ? (
-                            <span className="badge badge-warning">Admin</span>
-                          ) : (
-                            <span className="text-gray-500">-</span>
-                          )}
-                        </td>
-                        <td>{u.credits_used}</td>
-                        <td>
-                          {editingUser === u.email ? (
-                            <div className="flex gap-2">
-                              <button
-                                onClick={() => handleSaveUser(u.email)}
-                                className="p-1 hover:bg-green-500/20 rounded"
-                              >
-                                <CheckIcon className="w-4 h-4 text-green-400" />
-                              </button>
-                              <button
-                                onClick={() => setEditingUser(null)}
-                                className="p-1 hover:bg-red-500/20 rounded"
-                              >
-                                <XMarkIcon className="w-4 h-4 text-red-400" />
-                              </button>
-                            </div>
-                          ) : (
+                          </td>
+                          <td>
+                            {u.is_admin ? (
+                              <span className="badge badge-warning">Admin</span>
+                            ) : (
+                              <span className="text-gray-500">-</span>
+                            )}
+                          </td>
+                          <td>{u.credits_used}</td>
+                          <td>
                             <button
-                              onClick={() => handleEditUser(u)}
+                              onClick={() => openEditMember(u)}
                               className="p-1 hover:bg-white/10 rounded"
+                              title="Edit member"
                             >
                               <PencilIcon className="w-4 h-4 text-gray-400" />
                             </button>
-                          )}
-                        </td>
-                      </motion.tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                          </td>
+                        </motion.tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
 
@@ -443,6 +504,153 @@ export default function AdminPage() {
           )}
         </>
       )}
+
+      {/* Add / Edit Member Modal */}
+      <AnimatePresence>
+        {modalMode && (
+          <motion.div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={closeModal}
+          >
+            <motion.div
+              className="card w-full max-w-md p-6"
+              initial={{ opacity: 0, scale: 0.96, y: 8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 8 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-5">
+                <h3 className="text-lg font-semibold">
+                  {modalMode === 'add' ? 'Add Member' : 'Edit Member'}
+                </h3>
+                <button
+                  onClick={closeModal}
+                  className="p-1 hover:bg-white/10 rounded text-gray-400"
+                >
+                  <XMarkIcon className="w-5 h-5" />
+                </button>
+              </div>
+
+              {formError && (
+                <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+                  {formError}
+                </div>
+              )}
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Email</label>
+                  <input
+                    type="email"
+                    value={form.email}
+                    onChange={(e) => setForm({ ...form, email: e.target.value })}
+                    disabled={modalMode === 'edit'}
+                    placeholder="member@berkeley.edu"
+                    className="input w-full py-2 px-3 disabled:opacity-60 disabled:cursor-not-allowed"
+                  />
+                  {modalMode === 'edit' && (
+                    <p className="text-xs text-gray-500 mt-1">Email is the member ID and can’t be changed.</p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Name</label>
+                  <input
+                    type="text"
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                    placeholder="Full name"
+                    className="input w-full py-2 px-3"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Membership</label>
+                  <select
+                    value={form.membership}
+                    onChange={(e) => setForm({ ...form, membership: e.target.value })}
+                    className="input w-full py-2 px-3"
+                  >
+                    <option value="aba">ABA</option>
+                    <option value="external">External</option>
+                  </select>
+                </div>
+
+                {form.membership === 'aba' && (
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-1">Team</label>
+                    <select
+                      value={form.team_name}
+                      onChange={(e) => setForm({ ...form, team_name: e.target.value })}
+                      className="input w-full py-2 px-3"
+                    >
+                      {ABA_TEAMS.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Role</label>
+                  <select
+                    value={form.role}
+                    onChange={(e) => setForm({ ...form, role: e.target.value })}
+                    className="input w-full py-2 px-3"
+                  >
+                    <option value="consultant">Consultant</option>
+                    <option value="pm">PM</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-6 pt-1">
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={form.is_admin}
+                      onChange={(e) => setForm({ ...form, is_admin: e.target.checked })}
+                      className="w-4 h-4"
+                    />
+                    Admin
+                  </label>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={form.blacklist_exempt}
+                      onChange={(e) => setForm({ ...form, blacklist_exempt: e.target.checked })}
+                      className="w-4 h-4"
+                    />
+                    Blacklist exempt
+                  </label>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 mt-6">
+                <button
+                  onClick={closeModal}
+                  disabled={saving}
+                  className="btn-secondary py-2 px-4 disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSubmitMember}
+                  disabled={saving}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#635bff] text-white hover:bg-[#5249e0] transition-all disabled:opacity-60"
+                >
+                  {saving && <div className="loading-spinner !w-4 !h-4" />}
+                  {modalMode === 'add' ? 'Add Member' : 'Save Changes'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

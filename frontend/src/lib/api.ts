@@ -108,8 +108,8 @@ class ApiClient {
   }
 
   // Team Leads
-  async getTeamLeads(filter?: 'available' | 'contacted') {
-    const params = filter ? `?filter=${filter}` : '';
+  async getTeamLeads(filter?: 'all' | 'available' | 'contacted') {
+    const params = filter && filter !== 'all' ? `?filter=${filter}` : '';
     return this.request<{ leads: any[]; stats: any }>(`/api/team-leads${params}`);
   }
 
@@ -238,7 +238,14 @@ class ApiClient {
 
   async updateUser(
     email: string,
-    data: { role?: string; is_admin?: boolean; membership?: string; blacklist_exempt?: boolean }
+    data: {
+      name?: string;
+      team_name?: string;
+      role?: string;
+      is_admin?: boolean;
+      membership?: string;
+      blacklist_exempt?: boolean;
+    }
   ) {
     return this.request<{ success: boolean }>(`/api/admin/users/${encodeURIComponent(email)}`, {
       method: 'PUT',
@@ -249,7 +256,7 @@ class ApiClient {
   async saveUser(user: {
     email: string;
     name: string;
-    team_name: string;
+    team_name?: string;
     role: string;
     is_admin: boolean;
     membership?: string;

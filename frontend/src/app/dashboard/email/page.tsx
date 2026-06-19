@@ -91,7 +91,7 @@ export default function EmailOutreachPage() {
   const handleSaveTemplate = async () => {
     try {
       await api.saveTemplate({
-        id: editingTemplate?.id,
+        template_id: editingTemplate?.id,
         ...templateForm,
       });
       setShowTemplateForm(false);

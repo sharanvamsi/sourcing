@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Literal
 from datetime import datetime, timedelta
 import os
 import sys
@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'))
 
 from db_manager import (
-    init_db, get_user, get_all_users, add_user, query,
+    init_db, get_user, get_all_users, add_user, update_user, count_admins, query,
     get_basket_leads, add_lead_to_basket, clear_basket,
     get_user_credit_total, get_team_credit_total, get_team_info,
     check_team_credit_limit, log_credit_usage, log_audit_event,
@@ -111,11 +111,11 @@ class ApiKeyRequest(BaseModel):
 class UserRequest(BaseModel):
     email: str
     name: str
-    team_name: str
-    role: str = "consultant"
+    team_name: str = ""  # not required for external members; backend assigns placeholder
+    role: Literal["consultant", "pm"] = "consultant"
     is_admin: bool = False
     blacklist_exempt: bool = False
-    membership: str = "aba"
+    membership: Literal["aba", "external"] = "aba"
 
 # ============== Auth Helpers ==============
 
@@ -510,86 +510,59 @@ async def get_users(user: dict = Depends(require_admin)):
 
 @app.post("/api/admin/users")
 async def create_or_update_user(request: UserRequest, user: dict = Depends(require_admin)):
-    add_user(
-        email=request.email,
-        name=request.name,
-        team_name=request.team_name,
-        is_admin=request.is_admin,
-        role=request.role,
-        blacklist_exempt=request.blacklist_exempt,
-        membership=request.membership
-    )
+    try:
+        add_user(
+            email=request.email,
+            name=request.name,
+            team_name=request.team_name,
+            is_admin=request.is_admin,
+            role=request.role,
+            blacklist_exempt=request.blacklist_exempt,
+            membership=request.membership
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    log_audit_event(user["email"], "USER_CREATED", f"Created/updated {request.email.strip().lower()}")
     return {"success": True}
 
 class UpdateUserRequest(BaseModel):
-    role: Optional[str] = None
+    name: Optional[str] = None
+    team_name: Optional[str] = None
+    role: Optional[Literal["consultant", "pm"]] = None
     is_admin: Optional[bool] = None
-    membership: Optional[str] = None
+    membership: Optional[Literal["aba", "external"]] = None
     blacklist_exempt: Optional[bool] = None
 
 @app.put("/api/admin/users/{email}")
 async def update_user_role(email: str, request: UpdateUserRequest, user: dict = Depends(require_admin)):
-    """Update user role and admin status"""
-    if DATABASE_URL:
-        import psycopg2
-        from psycopg2.extras import RealDictCursor
-        conn = psycopg2.connect(DATABASE_URL)
-        cursor = conn.cursor(cursor_factory=RealDictCursor)
+    """Update an existing user's profile, role, membership or flags.
 
-        updates = []
-        values = []
-        if request.role is not None:
-            updates.append("role = %s")
-            values.append(request.role)
-        if request.is_admin is not None:
-            updates.append("is_admin = %s")
-            values.append(request.is_admin)
-        if request.membership is not None:
-            updates.append("membership = %s")
-            values.append(request.membership)
-        if request.blacklist_exempt is not None:
-            updates.append("blacklist_exempt = %s")
-            values.append(request.blacklist_exempt)
+    Routes through db_manager.update_user so edits get the same validation,
+    membership/team syncing and audit logging as creation.
+    """
+    target = get_user(email)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
 
-        if updates:
-            values.append(email)
-            cursor.execute(
-                f"UPDATE users SET {', '.join(updates)} WHERE email = %s",
-                values
-            )
-            conn.commit()
-        cursor.close()
-        conn.close()
-    else:
-        import sqlite3
-        conn = sqlite3.connect("sourcing.db")
-        cursor = conn.cursor()
+    # Prevent locking everyone out by demoting the last remaining admin.
+    if request.is_admin is False and dict(target).get("is_admin") and count_admins() <= 1:
+        raise HTTPException(status_code=400, detail="Cannot remove the last remaining admin")
 
-        updates = []
-        values = []
-        if request.role is not None:
-            updates.append("role = ?")
-            values.append(request.role)
-        if request.is_admin is not None:
-            updates.append("is_admin = ?")
-            values.append(1 if request.is_admin else 0)
-        if request.membership is not None:
-            updates.append("membership = ?")
-            values.append(request.membership)
-        if request.blacklist_exempt is not None:
-            updates.append("blacklist_exempt = ?")
-            values.append(1 if request.blacklist_exempt else 0)
+    changes = {k: v for k, v in {
+        "name": request.name,
+        "team_name": request.team_name,
+        "role": request.role,
+        "is_admin": request.is_admin,
+        "membership": request.membership,
+        "blacklist_exempt": request.blacklist_exempt,
+    }.items() if v is not None}
 
-        if updates:
-            values.append(email)
-            cursor.execute(
-                f"UPDATE users SET {', '.join(updates)} WHERE email = ?",
-                values
-            )
-            conn.commit()
-        cursor.close()
-        conn.close()
+    try:
+        update_user(email, **changes)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
+    log_audit_event(user["email"], "USER_UPDATED", f"Updated {email.strip().lower()}: {changes}")
     return {"success": True}
 
 @app.get("/api/admin/analytics")
