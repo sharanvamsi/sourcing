@@ -50,10 +50,17 @@ app = FastAPI(
     version="2.0.0"
 )
 
-# CORS for Next.js frontend
+# CORS for the Next.js frontend. The previous "https://*.vercel.app" entry never
+# matched (Starlette does exact-string matching on allow_origins). Extra origins
+# can be supplied via CORS_ORIGINS (comma-separated); any *.up.railway.app domain
+# is allowed by regex so the Railway-hosted frontend works without hardcoding its
+# generated subdomain.
+_default_origins = "http://localhost:3000"
+ALLOWED_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", _default_origins).split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "https://*.vercel.app"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r"https://.*\.up\.railway\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
