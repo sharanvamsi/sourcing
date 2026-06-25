@@ -10,3 +10,6 @@ roster.json
 blacklist.json
 local_errors.log
 
+
+# Backend railway up build-config override — must NEVER be committed (would hijack the Streamlit service build)
+/railway.json
