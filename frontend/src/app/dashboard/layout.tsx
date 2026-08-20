@@ -20,14 +20,8 @@ const navigation = [
   { name: 'Basket', href: '/dashboard/basket', icon: ShoppingCartIcon },
   { name: 'Team Leads', href: '/dashboard/team-leads', icon: UserGroupIcon },
 ];
-
-const pmNavigation = [
-  { name: 'Email Outreach', href: '/dashboard/email', icon: EnvelopeIcon },
-];
-
-const adminNavigation = [
-  { name: 'Admin', href: '/dashboard/admin', icon: ChartBarIcon },
-];
+const pmNavigation = [{ name: 'Outreach', href: '/dashboard/email', icon: EnvelopeIcon }];
+const adminNavigation = [{ name: 'Admin', href: '/dashboard/admin', icon: ChartBarIcon }];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { user, isLoading, logout, creditsUsed, basketCount } = useAuth();
@@ -35,109 +29,75 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const pathname = usePathname();
 
   useEffect(() => {
-    if (!isLoading && !user) {
-      router.push('/login');
-    }
+    if (!isLoading && !user) router.push('/login');
   }, [user, isLoading, router]);
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="loading-spinner" />
-      </div>
-    );
-  }
-
-  if (!user) {
-    return null;
-  }
-
-  const isPM = user.role === 'pm';
-  const isAdmin = user.is_admin;
+  if (isLoading) return <div className="min-h-screen flex items-center justify-center"><div className="loading-spinner" /></div>;
+  if (!user) return null;
 
   const allNavigation = [
     ...navigation,
-    ...(isPM ? pmNavigation : []),
-    ...(isAdmin ? adminNavigation : []),
+    ...(user.role === 'pm' ? pmNavigation : []),
+    ...(user.is_admin ? adminNavigation : []),
   ];
+  const isActive = (href: string) => pathname === href || (href !== '/dashboard' && pathname.startsWith(href));
+  const initial = user.name?.[0]?.toUpperCase() || 'S';
 
   return (
-    <div className="min-h-screen flex">
-      {/* Gradient background */}
-      <div className="gradient-bg">
-        <div className="glow-orb glow-orb-1" />
-        <div className="glow-orb glow-orb-2" />
-      </div>
+    <div className="min-h-screen bg-[#0A0A0A]">
+      <aside className="sidebar hidden md:flex fixed inset-y-0 left-0 z-50 w-60 flex-col">
+        <Link href="/dashboard" className="flex items-center gap-2 px-6 h-[73px] border-b border-[#1F1F1F]">
+          <span className="flex h-7 w-7 items-center justify-center rounded bg-[#3B82F6] text-sm font-semibold text-white">S</span>
+          <span className="text-sm font-semibold text-[#F5F5F5]">Sourcing</span>
+        </Link>
 
-      {/* Sidebar */}
-      <motion.aside
-        initial={{ x: -280 }}
-        animate={{ x: 0 }}
-        transition={{ duration: 0.3 }}
-        className="sidebar w-64 fixed h-full flex flex-col z-20"
-      >
-        {/* Logo */}
-        <div className="p-6 border-b border-white/10">
-          <h1 className="text-xl font-bold bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">
-            ABA Sourcing
-          </h1>
-        </div>
-
-        {/* User info */}
-        <div className="p-4 border-b border-white/10">
-          <div className="text-sm font-medium">{user.name}</div>
-          <div className="text-xs text-gray-400">{user.team_name}</div>
-          <div className="flex items-center gap-4 mt-3 text-xs">
-            <div>
-              <span className="text-gray-400">Credits:</span>{' '}
-              <span className="text-white font-medium">{creditsUsed}</span>
-            </div>
-            <div>
-              <span className="text-gray-400">Basket:</span>{' '}
-              <span className="text-white font-medium">{basketCount}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Navigation */}
-        <nav className="flex-1 p-4 space-y-1">
-          {allNavigation.map((item) => {
-            const isActive = pathname === item.href ||
-              (item.href !== '/dashboard' && pathname.startsWith(item.href));
-            return (
-              <Link
-                key={item.name}
-                href={item.href}
-                className={`sidebar-link ${isActive ? 'active' : ''}`}
-              >
-                <item.icon className="w-5 h-5" />
-                {item.name}
-              </Link>
-            );
-          })}
+        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+          {allNavigation.map((item) => (
+            <Link key={item.href} href={item.href} className={`sidebar-link ${isActive(item.href) ? 'active' : ''}`}>
+              <item.icon className="h-4 w-4" />
+              <span>{item.name}</span>
+              {item.name === 'Basket' && basketCount > 0 && <span className="ml-auto rounded-full bg-[#1F1F1F] px-2 py-0.5 text-[10px] text-[#A3A3A3]">{basketCount}</span>}
+            </Link>
+          ))}
         </nav>
 
-        {/* Settings & Logout */}
-        <div className="p-4 border-t border-white/10 space-y-1">
-          <Link href="/dashboard/settings" className="sidebar-link">
-            <Cog6ToothIcon className="w-5 h-5" />
-            Settings
+        <div className="px-3 pb-3 space-y-1">
+          <Link href="/dashboard/settings" className={`sidebar-link ${isActive('/dashboard/settings') ? 'active' : ''}`}>
+            <Cog6ToothIcon className="h-4 w-4" /><span>Settings</span>
           </Link>
           <button onClick={logout} className="sidebar-link w-full text-left">
-            <ArrowRightOnRectangleIcon className="w-5 h-5" />
-            Logout
+            <ArrowRightOnRectangleIcon className="h-4 w-4" /><span>Log out</span>
           </button>
         </div>
-      </motion.aside>
 
-      {/* Main content */}
-      <main className="flex-1 ml-64 p-8 relative z-10">
-        <motion.div
-          key={pathname}
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.2 }}
-        >
+        <div className="flex items-center gap-3 border-t border-[#1F1F1F] p-4">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#3B82F6] text-sm font-medium text-white">{initial}</div>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-medium text-[#F5F5F5]">{user.name}</div>
+            <div className="truncate text-xs text-[#A3A3A3]">{user.team_name} · {creditsUsed} credits</div>
+          </div>
+          <div className="h-2 w-2 rounded-full bg-[#10B981]" />
+        </div>
+      </aside>
+
+      <header className="fixed inset-x-0 top-0 z-40 flex h-14 items-center justify-between border-b border-[#1F1F1F] bg-[#0A0A0A] px-4 md:hidden">
+        <Link href="/dashboard" className="flex items-center gap-2">
+          <span className="flex h-7 w-7 items-center justify-center rounded bg-[#3B82F6] text-sm font-semibold text-white">S</span>
+          <span className="text-sm font-semibold">Sourcing</span>
+        </Link>
+        <button onClick={logout} aria-label="Log out" className="p-2 text-[#A3A3A3] hover:text-white"><ArrowRightOnRectangleIcon className="h-5 w-5" /></button>
+      </header>
+
+      <nav className="fixed inset-x-0 bottom-0 z-50 flex overflow-x-auto border-t border-[#1F1F1F] bg-[#0A0A0A] md:hidden">
+        {[...allNavigation, { name: 'Settings', href: '/dashboard/settings', icon: Cog6ToothIcon }].map((item) => (
+          <Link key={item.href} href={item.href} className={`flex min-w-[72px] flex-1 flex-col items-center gap-1 px-2 py-3 text-[10px] ${isActive(item.href) ? 'text-[#3B82F6]' : 'text-[#A3A3A3]'}`}>
+            <item.icon className="h-5 w-5" /><span>{item.name}</span>
+          </Link>
+        ))}
+      </nav>
+
+      <main className="min-h-screen px-4 pb-24 pt-20 md:ml-60 md:px-8 md:pb-10 md:pt-8">
+        <motion.div key={pathname} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .16 }} className="mx-auto w-full max-w-7xl">
           {children}
         </motion.div>
       </main>

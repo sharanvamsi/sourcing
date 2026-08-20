@@ -84,8 +84,8 @@ export default function TeamLeadsPage() {
             onClick={() => setFilter(f)}
             className={`px-4 py-2 rounded-lg text-sm transition-all ${
               filter === f
-                ? 'bg-[#635bff] text-white'
-                : 'bg-white/5 text-gray-400 hover:bg-white/10'
+                ? 'bg-[#3B82F6] text-white'
+                : 'bg-[#161616] text-gray-400 hover:bg-[#1F1F1F]'
             }`}
           >
             {f.charAt(0).toUpperCase() + f.slice(1)}

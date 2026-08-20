@@ -7,10 +7,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import {
   UsersIcon,
   BuildingOfficeIcon,
-  CreditCardIcon,
   ChartBarIcon,
   PencilIcon,
-  CheckIcon,
   XMarkIcon,
   UserPlusIcon,
 } from '@heroicons/react/24/outline';
@@ -28,8 +26,7 @@ interface User {
 
 interface Team {
   name: string;
-  total_credits: number;
-  used_credits: number;
+  total_credits_used: number;
   member_count: number;
 }
 
@@ -72,10 +69,6 @@ export default function AdminPage() {
   const [form, setForm] = useState<MemberForm>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
-
-  // Add credits state
-  const [addingCredits, setAddingCredits] = useState<string | null>(null);
-  const [creditsAmount, setCreditsAmount] = useState(0);
 
   useEffect(() => {
     fetchData();
@@ -175,18 +168,6 @@ export default function AdminPage() {
     }
   };
 
-  const handleAddCredits = async (teamName: string) => {
-    if (creditsAmount <= 0) return;
-    try {
-      await api.addTeamCredits(teamName, creditsAmount);
-      setAddingCredits(null);
-      setCreditsAmount(0);
-      fetchData();
-    } catch (err: any) {
-      setError(err.message);
-    }
-  };
-
   if (!user?.is_admin) {
     return (
       <div className="card p-12 text-center">
@@ -233,8 +214,8 @@ export default function AdminPage() {
             onClick={() => setActiveTab(tab.id)}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all ${
               activeTab === tab.id
-                ? 'bg-[#635bff] text-white'
-                : 'bg-white/5 text-gray-400 hover:bg-white/10'
+                ? 'bg-[#3B82F6] text-white'
+                : 'bg-[#161616] text-gray-400 hover:bg-[#1F1F1F]'
             }`}
           >
             <tab.icon className="w-5 h-5" />
@@ -267,7 +248,7 @@ export default function AdminPage() {
                   />
                   <button
                     onClick={openAddMember}
-                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#635bff] text-white hover:bg-[#5249e0] transition-all"
+                    className="flex items-center gap-2 px-4 py-2 rounded bg-[#3B82F6] text-white hover:bg-[#2563EB] transition-colors"
                   >
                     <UserPlusIcon className="w-5 h-5" />
                     Add Member
@@ -356,59 +337,12 @@ export default function AdminPage() {
                         <h3 className="font-semibold text-lg">{team.name}</h3>
                         <p className="text-sm text-gray-400">{team.member_count} members</p>
                       </div>
-                      <div className="flex items-center gap-6">
-                        <div className="text-right">
-                          <div className="text-sm text-gray-400">Credits</div>
-                          <div className="font-semibold">
-                            {team.used_credits} / {team.total_credits}
-                          </div>
-                          <div className="w-32 h-2 bg-white/10 rounded-full mt-1">
-                            <div
-                              className="h-full bg-[#635bff] rounded-full"
-                              style={{
-                                width: `${Math.min(
-                                  (team.used_credits / team.total_credits) * 100,
-                                  100
-                                )}%`,
-                              }}
-                            />
-                          </div>
+                      <div className="flex items-center gap-6 text-right">
+                        <div>
+                          <div className="text-sm text-gray-400">Credits used</div>
+                          <div className="font-semibold">{team.total_credits_used}</div>
                         </div>
-                        {addingCredits === team.name ? (
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="number"
-                              value={creditsAmount}
-                              onChange={(e) => setCreditsAmount(Number(e.target.value))}
-                              className="input w-24 py-1"
-                              placeholder="Amount"
-                              min={1}
-                            />
-                            <button
-                              onClick={() => handleAddCredits(team.name)}
-                              className="p-1 hover:bg-green-500/20 rounded"
-                            >
-                              <CheckIcon className="w-5 h-5 text-green-400" />
-                            </button>
-                            <button
-                              onClick={() => {
-                                setAddingCredits(null);
-                                setCreditsAmount(0);
-                              }}
-                              className="p-1 hover:bg-red-500/20 rounded"
-                            >
-                              <XMarkIcon className="w-5 h-5 text-red-400" />
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => setAddingCredits(team.name)}
-                            className="btn-secondary flex items-center gap-2 py-2"
-                          >
-                            <CreditCardIcon className="w-4 h-4" />
-                            Add Credits
-                          </button>
-                        )}
+                        <span className="badge badge-info">Unlimited</span>
                       </div>
                     </div>
                   </motion.div>
@@ -480,7 +414,6 @@ export default function AdminPage() {
                           <th>Team</th>
                           <th>Members</th>
                           <th>Credits Used</th>
-                          <th>Total Credits</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -491,8 +424,7 @@ export default function AdminPage() {
                               {t.name}
                             </td>
                             <td className="text-gray-400">{t.member_count}</td>
-                            <td>{t.used_credits}</td>
-                            <td>{t.total_credits}</td>
+                            <td>{t.total_credits_used}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -641,7 +573,7 @@ export default function AdminPage() {
                 <button
                   onClick={handleSubmitMember}
                   disabled={saving}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#635bff] text-white hover:bg-[#5249e0] transition-all disabled:opacity-60"
+                  className="flex items-center gap-2 px-4 py-2 rounded bg-[#3B82F6] text-white hover:bg-[#2563EB] transition-colors disabled:opacity-60"
                 >
                   {saving && <div className="loading-spinner !w-4 !h-4" />}
                   {modalMode === 'add' ? 'Add Member' : 'Save Changes'}

@@ -29,9 +29,6 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 # "External" is used as an internal placeholder for non-ABA users.
 ALLOWED_TEAMS = ["BD", "Finance", "Marketing", "Strategy", "NPO", "Exec Board", "External"]
 
-# Team credit limit (Exec Board team has no limit)
-TEAM_CREDIT_LIMIT = 4500
-EXEC_TEAM_NAME = "Exec Board"
 EXTERNAL_TEAM_NAME = "External"
 
 # --- DATABASE CONNECTION POOLING ---
@@ -1366,41 +1363,6 @@ def cleanup_expired_sessions():
     Removes expired sessions from the database.
     """
     query("DELETE FROM user_sessions WHERE expires_at IS NOT NULL AND expires_at < ?", (datetime.now(),))
-
-
-def check_team_credit_limit(team_name, credits_to_add=0):
-    """
-    Checks if a team can perform an operation that would add credits.
-
-    Args:
-        team_name: Name of the team
-        credits_to_add: Number of credits that would be added (default: 0, just checking current status)
-
-    Returns:
-        tuple: (is_allowed: bool, remaining_credits: int, current_credits: int)
-    """
-    # Exec Board + External have no limit
-    if team_name in (EXEC_TEAM_NAME, EXTERNAL_TEAM_NAME):
-        return (True, None, get_team_credit_total(team_name))
-
-    # Get current team credits
-    current_credits = get_team_credit_total(team_name)
-
-    # Calculate total after adding credits
-    total_after = current_credits + credits_to_add
-
-    # Check if it would exceed limit
-    if total_after > TEAM_CREDIT_LIMIT:
-        remaining = max(0, TEAM_CREDIT_LIMIT - current_credits)
-        return (False, remaining, current_credits)
-
-    # Check if already at or over limit (for search blocking)
-    if current_credits >= TEAM_CREDIT_LIMIT:
-        return (False, 0, current_credits)
-
-    # Within limit
-    remaining = TEAM_CREDIT_LIMIT - total_after
-    return (True, remaining, current_credits)
 
 
 # --- TEAM BASKET FUNCTIONS ---

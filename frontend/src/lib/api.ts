@@ -272,16 +272,6 @@ class ApiClient {
     return this.request<{ teams: any[] }>('/api/admin/teams');
   }
 
-  async addTeamCredits(teamName: string, amount: number) {
-    return this.request<{ success: boolean; new_total: number }>(
-      `/api/admin/teams/${encodeURIComponent(teamName)}/credits`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ amount }),
-      }
-    );
-  }
-
   async getBlacklist() {
     return this.request<{ domains: string[] }>('/api/admin/blacklist');
   }
