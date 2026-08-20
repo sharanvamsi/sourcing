@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { motion } from 'framer-motion';
+import Image from 'next/image';
 import { useAuth } from '@/contexts/AuthContext';
 
 export default function LoginPage() {
@@ -26,30 +27,26 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center relative overflow-hidden">
-      {/* Animated gradient background */}
-      <div className="gradient-bg">
-        <div className="glow-orb glow-orb-1" />
-        <div className="glow-orb glow-orb-2" />
-      </div>
+    <div className="min-h-screen flex items-center justify-center bg-[#0A0A0A]">
 
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
-        className="relative z-10 w-full max-w-md px-6"
+        className="w-full max-w-sm px-6"
       >
         {/* Logo */}
         <motion.div
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ delay: 0.1, duration: 0.5 }}
-          className="text-center mb-8"
+          className="mb-8 text-center"
         >
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">
-            ABA Sourcing
-          </h1>
-          <p className="text-gray-400 mt-2">Lead sourcing & outreach platform</p>
+          <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center overflow-hidden rounded-full bg-white">
+            <Image src="/aba.png" alt="ABA logo" width={64} height={64} priority className="h-full w-full object-contain" />
+          </div>
+          <h1 className="text-2xl font-semibold tracking-tight text-[#F5F5F5]">Welcome to ABA Sourcing</h1>
+          <p className="text-gray-400 mt-2 text-sm">Lead sourcing and outreach for ABA teams.</p>
         </motion.div>
 
         {/* Login Card */}
@@ -57,9 +54,9 @@ export default function LoginPage() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2, duration: 0.5 }}
-          className="card p-8"
+          className="card p-6"
         >
-          <h2 className="text-xl font-semibold mb-6">Sign in to your account</h2>
+          <h2 className="text-base font-semibold mb-6">Sign in to your account</h2>
 
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
@@ -75,13 +72,13 @@ export default function LoginPage() {
             </div>
 
             <div>
-              <label className="block text-sm text-gray-400 mb-2">Club Password</label>
+              <label className="block text-sm text-gray-400 mb-2">Password</label>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="input"
-                placeholder="Enter club password"
+                placeholder="Enter password"
                 required
               />
             </div>
@@ -90,7 +87,7 @@ export default function LoginPage() {
               <motion.div
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm"
+                className="p-3 rounded bg-red-500/10 border border-red-500/20 text-red-400 text-sm"
               >
                 {error}
               </motion.div>
@@ -118,9 +115,9 @@ export default function LoginPage() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.4, duration: 0.5 }}
-          className="text-center text-gray-500 text-sm mt-6"
+          className="text-center text-gray-500 text-xs mt-6"
         >
-          Alpha Beta Associates &copy; {new Date().getFullYear()}
+          ABA @ 2026
         </motion.p>
       </motion.div>
     </div>

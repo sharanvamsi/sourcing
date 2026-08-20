@@ -14,7 +14,7 @@ from db_manager import (
     get_blacklist, add_to_blacklist, remove_from_blacklist,
     get_cached_domain, update_domain_cache, check_environment, ALLOWED_TEAMS,
     get_user_credit_total, get_team_credit_total, get_team_members, get_team_info,
-    check_team_credit_limit, create_user_session, get_user_from_session,
+    create_user_session, get_user_from_session,
     delete_user_session, cleanup_expired_sessions,
     # Team basket functions
     get_or_create_team_basket, get_team_basket_leads, is_lead_in_team_basket,
@@ -242,7 +242,7 @@ def main():
         st.write("Welcome back! Please enter your email to continue.")
         
         login_email = st.text_input("Enter your Email", placeholder="user@example.com")
-        login_pass = st.text_input("Enter Club Password", type="password")
+        login_pass = st.text_input("Enter Password", type="password")
         
         if st.button("Sign In", type="primary"):
             if not login_email or not login_pass:
@@ -251,7 +251,7 @@ def main():
                 # Get password from environment variable, fallback to default for backward compatibility
                 expected_password = os.getenv("CLUB_PASSWORD", "club2025")
                 if login_pass != expected_password:
-                    log_audit_event(login_email, "LOGIN_FAILED", "Invalid club password")
+                    log_audit_event(login_email, "LOGIN_FAILED", "Invalid password")
                     st.error("Invalid password. Please check the club handbook.")
                 else:
                     # Password is correct, now check if user exists
@@ -503,14 +503,6 @@ def main():
                 st.error(f"🛑 Access Denied: '{domain_query}' is on the Global Blacklist.")
                 st.stop()
 
-            # Check team credit limit before allowing search
-            user_team = st.session_state.user['team_name']
-            is_allowed, remaining, current = check_team_credit_limit(user_team, credits_to_add=0)
-                
-            if not is_allowed:
-                st.error("🚫 Credit Limit Reached: Your team has used all 4,500 credits. Please contact your PMs.")
-                st.stop()
-                
             # Clear old checkbox states and results
             st.session_state.search_results = [] 
             st.session_state.selected_ids = set()
@@ -657,7 +649,6 @@ def main():
                 st.rerun()
                 
             if col_b2.button("✨ Enrich & Add to Team", type="primary"):
-                # Check team credit limit before enrichment
                 user_email = st.session_state.user['email']
                 user_team = st.session_state.user['team_name']
 
@@ -673,17 +664,6 @@ def main():
                     clear_basket(user_email)
                     st.session_state.basket = []
                     st.rerun()
-
-                credits_needed = len(non_duplicates)
-
-                is_allowed, remaining, current = check_team_credit_limit(user_team, credits_to_add=credits_needed)
-
-                if not is_allowed:
-                    if remaining is not None and remaining == 0:
-                        st.error("🚫 Credit Limit Reached: Your team has used all 4,500 credits. Please contact your PMs.")
-                    else:
-                        st.error(f"🚫 Credit Limit Exceeded: This enrichment would use {credits_needed} credits, but your team only has {remaining} credits remaining out of 4,500. Please reduce your basket size.")
-                    st.stop()
 
                 with st.spinner(f"Enriching {len(non_duplicates)} contacts (this uses credits)..."):
                     try:

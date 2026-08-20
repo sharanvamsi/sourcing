@@ -23,7 +23,7 @@ from db_manager import (
     init_db, get_user, get_all_users, add_user, update_user, count_admins, query,
     get_basket_leads, add_lead_to_basket, clear_basket,
     get_user_credit_total, get_team_credit_total, get_team_info,
-    check_team_credit_limit, log_credit_usage, log_audit_event,
+    log_credit_usage, log_audit_event,
     get_user_keys, save_user_keys, delete_user_keys,
     get_blacklist, add_to_blacklist, remove_from_blacklist,
     # Team basket functions
@@ -195,11 +195,6 @@ async def get_current_user(user: dict = Depends(verify_token)):
 
 @app.post("/api/search")
 async def search_leads(request: SearchRequest, user: dict = Depends(verify_token)):
-    # Check team credit limit
-    is_allowed, remaining, current = check_team_credit_limit(user["team_name"])
-    if not is_allowed:
-        raise HTTPException(status_code=403, detail="Team credit limit reached")
-
     # Check blacklist
     user_membership = (user.get("membership") or "aba").lower()
     apply_blacklist = (user_membership == "aba") and (not bool(user.get("blacklist_exempt")))
@@ -277,15 +272,6 @@ async def enrich_basket(user: dict = Depends(verify_token)):
             "credits_used": 0,
             "message": "All leads already in team basket"
         }
-
-    # Check credit limit
-    credits_needed = len(non_duplicates)
-    is_allowed, remaining, current = check_team_credit_limit(team_name, credits_needed)
-    if not is_allowed:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Credit limit exceeded. Need {credits_needed}, have {remaining} remaining"
-        )
 
     # Set API key
     api_key = get_user_keys(user["email"])
@@ -604,7 +590,7 @@ async def get_admin_analytics(user: dict = Depends(require_admin)):
     for team_name in ALLOWED_TEAMS:
         info = get_team_info(team_name)
         top_teams.append(info)
-    top_teams.sort(key=lambda x: x.get("used_credits", 0), reverse=True)
+    top_teams.sort(key=lambda x: x.get("total_credits_used", 0), reverse=True)
 
     return {
         "total_users": total_users,
@@ -622,48 +608,6 @@ async def get_teams(user: dict = Depends(require_admin)):
         info = get_team_info(team_name)
         teams.append(info)
     return {"teams": teams}
-
-class AddCreditsRequest(BaseModel):
-    amount: int
-
-@app.post("/api/admin/teams/{team_name}/credits")
-async def add_team_credits(team_name: str, request: AddCreditsRequest, user: dict = Depends(require_admin)):
-    """Add credits to a team"""
-    if team_name not in ALLOWED_TEAMS:
-        raise HTTPException(status_code=404, detail="Team not found")
-
-    if DATABASE_URL:
-        import psycopg2
-        from psycopg2.extras import RealDictCursor
-        conn = psycopg2.connect(DATABASE_URL)
-        cursor = conn.cursor(cursor_factory=RealDictCursor)
-        cursor.execute(
-            "UPDATE teams SET total_credits = total_credits + %s WHERE name = %s RETURNING total_credits",
-            (request.amount, team_name)
-        )
-        result = cursor.fetchone()
-        conn.commit()
-        cursor.close()
-        conn.close()
-        new_total = result["total_credits"] if result else 0
-    else:
-        import sqlite3
-        conn = sqlite3.connect("sourcing.db")
-        cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE teams SET total_credits = total_credits + ? WHERE name = ?",
-            (request.amount, team_name)
-        )
-        conn.commit()
-        cursor.execute("SELECT total_credits FROM teams WHERE name = ?", (team_name,))
-        result = cursor.fetchone()
-        new_total = result[0] if result else 0
-        cursor.close()
-        conn.close()
-
-    log_audit_event(user["email"], "ADD_CREDITS", f"Added {request.amount} credits to {team_name}")
-
-    return {"success": True, "new_total": new_total}
 
 @app.get("/api/admin/blacklist")
 async def get_blacklist_domains(user: dict = Depends(require_admin)):

@@ -161,8 +161,8 @@ export default function SearchPage() {
                   }}
                   className={`px-3 py-1 rounded-full text-xs transition-all ${
                     seniority.includes(opt.value)
-                      ? 'bg-[#635bff] text-white'
-                      : 'bg-white/5 text-gray-400 hover:bg-white/10'
+                      ? 'bg-[#3B82F6] text-white'
+                      : 'bg-[#161616] text-gray-400 hover:bg-[#1F1F1F]'
                   }`}
                 >
                   {opt.label}
@@ -267,7 +267,7 @@ export default function SearchPage() {
                         <div
                           className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all ${
                             selectedIds.has(person.id)
-                              ? 'bg-[#635bff] border-[#635bff]'
+                              ? 'bg-[#3B82F6] border-[#3B82F6]'
                               : 'border-gray-600'
                           }`}
                         >

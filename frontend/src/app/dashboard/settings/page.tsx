@@ -187,7 +187,7 @@ export default function SettingsPage() {
               href="https://app.apollo.io/#/settings/integrations/api"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-[#635bff] hover:underline"
+              className="text-[#3B82F6] hover:underline"
             >
               Apollo Settings
             </a>
@@ -241,7 +241,7 @@ export default function SettingsPage() {
                 href="https://app.sendgrid.com/settings/api_keys"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-[#635bff] hover:underline"
+                className="text-[#3B82F6] hover:underline"
               >
                 SendGrid Settings
               </a>

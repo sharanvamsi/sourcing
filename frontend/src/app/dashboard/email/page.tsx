@@ -222,8 +222,8 @@ export default function EmailOutreachPage() {
             onClick={() => setActiveTab(tab.id)}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all ${
               activeTab === tab.id
-                ? 'bg-[#635bff] text-white'
-                : 'bg-white/5 text-gray-400 hover:bg-white/10'
+                ? 'bg-[#3B82F6] text-white'
+                : 'bg-[#161616] text-gray-400 hover:bg-[#1F1F1F]'
             }`}
           >
             <tab.icon className="w-5 h-5" />
@@ -428,14 +428,14 @@ export default function EmailOutreachPage() {
                         key={lead.apollo_id}
                         onClick={() => toggleLeadSelection(lead.apollo_id)}
                         className={`p-3 border-b border-white/5 cursor-pointer transition-colors ${
-                          selectedLeads.has(lead.apollo_id) ? 'bg-[#635bff]/20' : 'hover:bg-white/5'
+                          selectedLeads.has(lead.apollo_id) ? 'bg-blue-500/10' : 'hover:bg-[#161616]'
                         }`}
                       >
                         <div className="flex items-center gap-3">
                           <div
                             className={`w-4 h-4 rounded border-2 flex items-center justify-center ${
                               selectedLeads.has(lead.apollo_id)
-                                ? 'bg-[#635bff] border-[#635bff]'
+                                ? 'bg-[#3B82F6] border-[#3B82F6]'
                                 : 'border-gray-600'
                             }`}
                           >
